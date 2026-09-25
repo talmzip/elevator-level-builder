@@ -5,6 +5,7 @@
   --muted: #6b6f76;
   --line: #d4d5d8;
   --danger: #c8372d;
+  --ok: #2f9e55;
   --teal: #3dbba6;
   --yellow: #f6cf45;
   --lavender: #b79cf4;
@@ -48,7 +49,19 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 
 /* Header */
-.header h1 { margin: 0 0 8px; font-size: 20px; text-align: center; }
+.title-row { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.header h1 { margin: 0; font-size: 20px; }
+/* Whether the kid's column up to the exit is free */
+.lane {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 15%, #fff);
+  color: color-mix(in srgb, var(--ok), #000 25%);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lane.blocked { background: color-mix(in srgb, var(--danger) 12%, #fff); color: var(--danger); }
 .header-row { display: flex; gap: 8px; }
 #name {
   flex: 1;
@@ -142,7 +155,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .piece.selected { z-index: 2; outline: 3px solid var(--ink); outline-offset: 2px; }
 .piece.pending { opacity: 0.6; border-style: dashed; }
-.piece.invalid { z-index: 3; opacity: 0.5; outline: 3px solid var(--danger); }
+/* Where a drag or resize would land */
+.piece.ghost { z-index: 4; opacity: 0.55; pointer-events: none; outline: 3px solid var(--ok); outline-offset: 1px; }
+.piece.ghost.invalid { background-color: var(--danger); border-color: var(--danger); outline-color: var(--danger); }
+/* Edge handles of the selected piece: a wide touch strip around a small visible bar */
+.handle { position: absolute; z-index: 5; display: grid; place-items: center; }
+.handle::after { content: ""; border-radius: 3px; background: var(--ink); box-shadow: 0 0 0 2px #fff; }
+.handle.left, .handle.right { cursor: ew-resize; }
+.handle.top, .handle.bottom { cursor: ns-resize; }
+.handle.left::after, .handle.right::after { width: 6px; height: min(60%, 28px); }
+.handle.top::after, .handle.bottom::after { width: min(60%, 28px); height: 6px; }
 .shake { animation: shake 0.3s; }
 @keyframes shake {
   25% { translate: -4px 0; }
@@ -166,6 +188,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 /* Tools */
 .side { display: flex; flex-direction: column; gap: 12px; }
 .palette, .play-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+/* Palette buttons drag onto the board */
+.palette { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .play-tools { grid-template-columns: 1fr 1fr; }
 .palette button {
   height: 64px;
@@ -217,8 +241,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .stepper { display: grid; grid-template-columns: 1fr 40px 28px 40px; align-items: center; gap: 6px; font-size: 13px; }
 .stepper button { padding: 0; }
 .stepper output { text-align: center; }
-.popup-note { margin: 0; color: var(--danger); font-size: 13px; }
-.popup-note:empty { display: none; }
 
 /* Wider screens: tools beside the board */
 @media (min-width: 720px) {

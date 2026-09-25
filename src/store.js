@@ -1,16 +1,20 @@
-// All levels in localStorage under one key, in the export shape: { version, levels }.
+// All levels in localStorage under one key, in the export shape plus the open level: { version, levels, current }.
 import { isValidLevel, newId, newLevel } from './model.js';
 
 const KEY = 'elevator-level-builder';
 const VERSION = 1;
 
+export let current = 0; // index of the level on screen; stored so a reload reopens it
 export const levels = load();
 
 function load() {
   try {
     const data = JSON.parse(localStorage.getItem(KEY));
     const stored = data?.version === VERSION && Array.isArray(data.levels) ? data.levels.filter(isValidLevel) : [];
-    if (stored.length) return stored;
+    if (stored.length) {
+      current = Number.isInteger(data.current) && stored[data.current] ? data.current : 0;
+      return stored;
+    }
   } catch {
     // Unreadable storage: start fresh.
   }
@@ -20,7 +24,12 @@ function load() {
 export const exportJson = () => JSON.stringify({ version: VERSION, levels }, null, 2);
 
 export function save() {
-  localStorage.setItem(KEY, exportJson());
+  localStorage.setItem(KEY, JSON.stringify({ version: VERSION, levels, current }));
+}
+
+export function open(index) {
+  current = index;
+  save();
 }
 
 // Each list op saves and returns the index to show next.

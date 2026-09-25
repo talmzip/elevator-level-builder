@@ -1,6 +1,10 @@
 // Grid rules shared with the game (Game-Design § 2 → Grid rules). Pure functions, no DOM.
 
 const key = (row, col) => `${row},${col}`;
+const flip = direction => (direction === 'h' ? 'v' : 'h');
+const largestOdd = n => (n % 2 ? n : n - 1);
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const isLine = piece => piece.type === 'twin' || piece.type === 'turner';
 
 export const kidPiece = level => ({ id: 'kid', type: 'kid', row: level.kid.row, col: level.kid.col });
 export const allPieces = level => [kidPiece(level), ...level.pieces];
@@ -12,7 +16,7 @@ export const isSolved = level => level.kid.row < 0;
 export function rectOf(piece) {
   const { row, col } = piece;
   if (piece.type === 'kid') return { row, col, w: 1, h: 1 };
-  if (piece.type === 'twin' || piece.type === 'turner') {
+  if (isLine(piece)) {
     return piece.orientation === 'h' ? { row, col, w: piece.length, h: 1 } : { row, col, w: 1, h: piece.length };
   }
   return { row, col, w: piece.w, h: piece.h };
@@ -27,7 +31,7 @@ export function cellsOf(piece) {
 
 export function axisOf(piece) {
   if (piece.type === 'kid') return 'v';
-  return piece.type === 'twin' || piece.type === 'turner' ? piece.orientation : piece.axis;
+  return isLine(piece) ? piece.orientation : piece.axis;
 }
 
 function occupied(level, ignoreIds) {
@@ -115,4 +119,123 @@ export function turnerTurn(level, piece) {
   const sweepClear = cells => cellsFree(level, cells, [piece.id]);
   const clear = sweepClear([...quadrant(-1, -1), ...quadrant(1, 1)]) || sweepClear([...quadrant(-1, 1), ...quadrant(1, -1)]);
   return clear ? turned : null;
+}
+
+// Every cell between the kid and the exit, in the kid's column, is free.
+export function laneClear(level) {
+  const lane = [];
+  for (let row = 0; row < level.kid.row; row++) lane.push([row, level.kid.col]);
+  return cellsFree(level, lane, []);
+}
+
+// Play tap: the ability's next step as the changed pieces, or null when there's no room. Accordion → next state
+// that fits (wrapping), turner → turn, twin → one cell from its partner (legality of the pair is `fits`).
+export function abilityStep(level, piece) {
+  switch (piece.type) {
+    case 'accordion': {
+      const states = accordionStates(level, piece);
+      const current = states.findIndex(state => state.w === piece.w && state.h === piece.h);
+      for (let step = 1; step < states.length; step++) {
+        const { w, h } = states[(current + step) % states.length];
+        const next = resize(piece, w, h);
+        if (fits(level, next)) return [next];
+      }
+      return null;
+    }
+    case 'turner': {
+      const turned = turnerTurn(level, piece);
+      return turned && [turned];
+    }
+    case 'twin': {
+      const partner = level.pieces.find(other => other.id === piece.partner);
+      return partner.length > 1 ? twinTransfer(level, piece, piece.length + 1) : null;
+    }
+    default: return null;
+  }
+}
+
+// Edit size limits: a side or line spans at most grid − 1 cells; a turner is odd and at least 3.
+export const maxSide = (level, direction) => (direction === 'h' ? level.cols : level.rows) - 1;
+export const maxTurnerLength = (level, orientation) => Math.max(3, largestOdd(maxSide(level, orientation)));
+
+// The piece with a w×h footprint (a line takes the side along its orientation), kept within the size limits.
+function sizedTo(level, piece, w, h) {
+  const along = piece.orientation === 'h' ? w : h;
+  if (piece.type === 'turner') return { ...piece, length: clamp(largestOdd(along), 3, maxTurnerLength(level, piece.orientation)) };
+  if (piece.type === 'twin') return { ...piece, length: clamp(along, 1, maxSide(level, piece.orientation)) };
+  return resize(piece, clamp(w, 1, maxSide(level, 'h')), clamp(h, 1, maxSide(level, 'v')));
+}
+
+const EDGES = { left: ['w', -1], right: ['w', 1], top: ['h', -1], bottom: ['h', 1] };
+
+// The piece with one edge dragged `cells` along its axis (right / down positive); the opposite edge stays put.
+export function resizedFromEdge(level, piece, edge, cells) {
+  const rect = rectOf(piece);
+  const [side, sign] = EDGES[edge];
+  const size = { w: rect.w, h: rect.h, [side]: rect[side] + sign * cells };
+  const sized = sizedTo(level, piece, size.w, size.h);
+  const after = rectOf(sized);
+  return sign < 0 ? moveTo(sized, rect.row + rect.h - after.h, rect.col + rect.w - after.w) : sized;
+}
+
+// The resized or rotated piece where it fits: at its own position first, else with its start or its far end
+// (right / bottom) where the original's was, so a size that hits something grows the other way. Null if none fits.
+export function fitResized(level, original, sized) {
+  const before = rectOf(original);
+  const after = rectOf(sized);
+  const rows = new Set([sized.row, before.row, before.row + before.h - after.h]);
+  const cols = new Set([sized.col, before.col, before.col + before.w - after.w]);
+  for (const row of rows) {
+    for (const col of cols) {
+      const candidate = moveTo(sized, row, col);
+      if (fits(level, candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+// Edit rotation: blocks swap w and h (a square toggles its axis), twins flip at their head, turners turn about the centre.
+export function rotated(piece) {
+  if (piece.type === 'turner') return turnerRotated(piece);
+  if (piece.type === 'twin') return { ...piece, orientation: flip(piece.orientation) };
+  return piece.w === piece.h ? { ...piece, axis: flip(piece.axis) } : resize(piece, piece.h, piece.w);
+}
+
+// The spot nearest the piece's position (fewest cells away) where it fits, or null.
+function nearestFit(level, piece) {
+  const spots = [];
+  for (let row = 0; row < level.rows; row++) for (let col = 0; col < level.cols; col++) spots.push(moveTo(piece, row, col));
+  const distance = spot => Math.abs(spot.row - piece.row) + Math.abs(spot.col - piece.col);
+  return spots.sort((a, b) => distance(a) - distance(b)).find(spot => fits(level, spot)) ?? null;
+}
+
+// One size step smaller (a block loses from its longer side), or null at the minimum.
+function shrunk(piece) {
+  if (piece.type === 'twin') return piece.length > 1 ? { ...piece, length: piece.length - 1 } : null;
+  if (piece.type === 'turner') return piece.length > 3 ? { ...piece, length: piece.length - 2 } : null;
+  if (piece.w > 1 && piece.w >= piece.h) return resize(piece, piece.w - 1, piece.h);
+  return piece.h > 1 ? resize(piece, piece.w, piece.h - 1) : null;
+}
+
+// The level on a new grid size; never blocks. The kid is clamped inside. Each piece is capped to the size limits
+// and moved to the nearest free spot (pieces already inside go first, so they keep their cells). With no spot free
+// it shrinks a step and retries; only at minimum size is it dropped, and a twin then takes its partner with it.
+export function regrid(level, rows, cols) {
+  const kid = { row: clamp(level.kid.row, 0, rows - 1), col: clamp(level.kid.col, 0, cols - 1) };
+  let next = { ...level, rows, cols, kid, pieces: [] };
+  const isInside = piece => {
+    const { row, col, w, h } = rectOf(piece);
+    return row + h <= rows && col + w <= cols;
+  };
+  for (const piece of [...level.pieces].sort((a, b) => isInside(b) - isInside(a))) {
+    const { w, h } = rectOf(piece);
+    let sized = sizedTo(next, piece, w, h);
+    let placed = null;
+    while (sized && !(placed = nearestFit(next, sized))) sized = shrunk(sized);
+    if (placed) next = { ...next, pieces: [...next.pieces, placed] };
+  }
+  const kept = new Map(next.pieces.map(piece => [piece.id, piece]));
+  const pieces = level.pieces.map(piece => kept.get(piece.id))
+    .filter(piece => piece && (piece.type !== 'twin' || kept.has(piece.partner)));
+  return { ...next, pieces };
 }

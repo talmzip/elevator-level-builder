@@ -1,5 +1,5 @@
 // Boot and wiring: app state, Edit / Play modes, palette, level navigation and file actions.
-import { allPieces, fits, isSolved, moveTo } from './rules.js';
+import { abilityStep, fitResized, fits, isSolved, laneClear, moveTo, regrid, rotated } from './rules.js';
 import { createPiece, getPiece, newLevel, nextPieceId, withPiece, withoutPiece } from './model.js';
 import * as store from './store.js';
 import { initBoard, pieceElement, renderBoard, shake } from './board.js';
@@ -10,7 +10,7 @@ const FLASH_MS = 1800;
 
 const $ = id => document.getElementById(id);
 const ui = {
-  name: $('name'), edit: $('edit-btn'), play: $('play-btn'), size: $('size-btn'),
+  name: $('name'), lane: $('lane'), edit: $('edit-btn'), play: $('play-btn'), size: $('size-btn'),
   stage: $('stage'), board: $('board'), solved: $('solved'), side: $('side'),
   palette: $('palette'), playTools: $('play-tools'), undo: $('undo-btn'), reset: $('reset-btn'), hint: $('hint'),
   prev: $('prev-btn'), next: $('next-btn'), position: $('position'),
@@ -18,16 +18,21 @@ const ui = {
 };
 
 const state = {
-  index: 0,
   play: null, // { level, start, history } while playing
   selectedId: null,
   armed: null, // palette type waiting for a cell
   pendingTwin: null, // first twin placed, waiting for its partner (not saved until paired)
   isGridOpen: false,
+  isResizeBlocked: false, // the last live resize step had no room, so the release snaps back
 };
 let flashTimer = null;
 
-const level = () => (state.play ? state.play.level : store.levels[state.index]);
+const level = () => (state.play ? state.play.level : store.levels[store.current]);
+
+function saveEdit(next) {
+  store.levels[store.current] = next;
+  store.save();
+}
 
 // Every edit saves immediately; every play action is undoable.
 function commit(next) {
@@ -35,17 +40,40 @@ function commit(next) {
     state.play.history.push(state.play.level);
     state.play.level = next;
   } else {
-    store.levels[state.index] = next;
-    store.save();
+    saveEdit(next);
   }
   render();
 }
 
-// Commits the pieces if legal; otherwise snaps back and shakes the selected piece.
-function apply(...pieces) {
-  if (pieces.every(Boolean) && fits(level(), ...pieces)) return commit(withPiece(level(), ...pieces));
+// Commits the pieces if legal; otherwise (null or no room) snaps back and shakes the selected piece.
+function apply(pieces) {
+  if (pieces && fits(level(), ...pieces)) return commit(withPiece(level(), ...pieces));
   render();
   shake(state.selectedId);
+}
+
+// Edit sliders and edge handles: each step saves at once if the size fits either way round; otherwise the
+// attempt shows as a red ghost. Only the board redraws, so the slider under the finger survives.
+function resizeLive(original, sized) {
+  const fitted = fitResized(level(), original, sized);
+  state.isResizeBlocked = !fitted;
+  if (fitted) saveEdit(withPiece(level(), fitted));
+  drawBoard(fitted ? null : sized);
+}
+
+function resizeEnd() {
+  const isBlocked = state.isResizeBlocked;
+  state.isResizeBlocked = false;
+  render();
+  if (isBlocked) shake(state.selectedId);
+}
+
+// Long-press in Edit: select and rotate, fitted like a resize.
+function rotate(id) {
+  const piece = getPiece(level(), id);
+  const turned = fitResized(level(), piece, rotated(piece));
+  state.selectedId = id;
+  apply(turned && [turned]);
 }
 
 function remove(piece) {
@@ -53,12 +81,7 @@ function remove(piece) {
   commit(withoutPiece(level(), piece));
 }
 
-function resizeGrid(rows, cols) {
-  const next = { ...level(), rows, cols };
-  if (!fits(next, ...allPieces(next))) return false;
-  commit(next);
-  return true;
-}
+const resizeGrid = (rows, cols) => commit(regrid(level(), rows, cols));
 
 function clearTransient() {
   state.selectedId = null;
@@ -79,14 +102,21 @@ function flash(message) {
 
 function renderHint() {
   if (flashTimer) return;
-  ui.hint.textContent = state.play ? 'Drag along lanes. Tap a creature for its ability.'
+  ui.hint.textContent = state.play ? 'Drag along lanes. Tap a creature to use its ability.'
     : state.pendingTwin ? 'Tap a cell for the partner twin.'
     : state.armed ? 'Tap a cell to place.'
-    : 'Choose a creature, then tap a cell.';
+    : state.selectedId && state.selectedId !== 'kid' ? 'Drag an edge to resize. Long-press to rotate.'
+    : 'Drag a creature onto the board, or tap it then a cell.';
 }
 
 function onBoardTap(id, row, col) {
   const current = level();
+  if (state.play) {
+    state.selectedId = id;
+    const piece = id && getPiece(current, id);
+    // Accordion, turner and twin cycle their ability on tap; kid and rigid have none.
+    return piece && piece.type !== 'kid' && piece.type !== 'rigid' ? apply(abilityStep(current, piece)) : render();
+  }
   if (state.pendingTwin) {
     const first = state.pendingTwin;
     const partner = { ...createPiece('twin', nextPieceId(current, 1), row, col), partner: first.id };
@@ -95,19 +125,35 @@ function onBoardTap(id, row, col) {
     if (!id && fits(current, first, partner)) return commit(withPiece(current, { ...first, partner: partner.id }, partner));
     return render();
   }
-  if (state.armed && !id) {
-    const piece = createPiece(state.armed, nextPieceId(current), row, col);
-    if (!fits(current, piece)) return flash('No room there.');
-    if (piece.type === 'twin') {
-      state.pendingTwin = piece;
-      return render();
-    }
-    state.armed = null;
-    return commit(withPiece(current, piece));
-  }
+  if (state.armed && !id) return place(state.armed, row, col);
   state.armed = null;
   state.selectedId = id;
   render();
+}
+
+// A new piece from the palette (tap-then-cell or drag); a twin waits for its partner.
+function place(type, row, col) {
+  const current = level();
+  const piece = createPiece(type, nextPieceId(current), row, col);
+  if (!fits(current, piece)) return flash('No room there.');
+  if (type === 'twin') {
+    state.pendingTwin = piece;
+    return render();
+  }
+  state.armed = null;
+  commit(withPiece(current, piece));
+}
+
+function arm(type) {
+  const wasArmed = state.armed;
+  clearTransient(); // another palette button cancels a half-placed twin pair
+  state.armed = wasArmed === type ? null : type;
+  render();
+}
+
+function drop(type, row, col) {
+  clearTransient();
+  place(type, row, col);
 }
 
 function onBoardMove(id, row, col) {
@@ -124,7 +170,7 @@ function setMode(isPlay) {
   if (isPlay === Boolean(state.play)) return;
   clearTransient();
   state.isGridOpen = false;
-  const edited = store.levels[state.index];
+  const edited = store.levels[store.current];
   // Levels are immutable, so the edited level itself is the snapshot Edit returns to.
   state.play = isPlay ? { level: edited, start: edited, history: [] } : null;
   render();
@@ -133,7 +179,7 @@ function setMode(isPlay) {
 function showLevel(index) {
   ui.name.blur(); // let render show the new level's name
   clearTransient();
-  state.index = index;
+  store.open(index);
   render();
 }
 
@@ -179,20 +225,32 @@ function render() {
   ui.reset.disabled = !state.play?.history.length;
   renderHint();
 
-  ui.position.textContent = `Level ${state.index + 1} of ${store.levels.length}`;
-  ui.prev.disabled = isPlay || state.index === 0;
-  ui.next.disabled = isPlay || state.index === store.levels.length - 1;
+  ui.position.textContent = `Level ${store.current + 1} of ${store.levels.length}`;
+  ui.prev.disabled = isPlay || store.current === 0;
+  ui.next.disabled = isPlay || store.current === store.levels.length - 1;
   for (const button of ui.actions.querySelectorAll('button')) button.disabled = isPlay;
   ui.solved.hidden = !(isPlay && isSolved(current));
 
-  const shown = state.pendingTwin ? withPiece(current, state.pendingTwin) : current;
-  renderBoard({ level: shown, mode: isPlay ? 'play' : 'edit', selectedId: state.selectedId, pendingId: state.pendingTwin?.id }, cellSize(current));
+  drawBoard();
   const selected = state.selectedId && getPiece(current, state.selectedId);
-  renderPiecePopup(selected ? { level: current, piece: selected, mode: isPlay ? 'play' : 'edit', anchor: pieceElement(selected.id), apply, remove } : null);
+  renderPiecePopup(selected
+    ? { level: current, piece: selected, mode: isPlay ? 'play' : 'edit', anchor: pieceElement(selected.id), apply, resizeLive, resizeEnd, remove }
+    : null);
   renderGridPopup(state.isGridOpen ? { level: current, anchor: ui.size, resizeGrid, close: () => { state.isGridOpen = false; render(); } } : null);
 }
 
-initBoard(ui.board, { tap: onBoardTap, move: onBoardMove });
+// ghost: a piece to show as a red ghost (a live resize with no room).
+function drawBoard(ghost = null) {
+  const current = level();
+  const shown = state.pendingTwin ? withPiece(current, state.pendingTwin) : current;
+  const mode = state.play ? 'play' : 'edit';
+  renderBoard({ level: shown, mode, selectedId: state.selectedId, pendingId: state.pendingTwin?.id, ghost }, cellSize(current));
+  const isClear = laneClear(current);
+  ui.lane.textContent = isClear ? 'Lane clear' : 'Lane blocked';
+  ui.lane.classList.toggle('blocked', !isClear);
+}
+
+initBoard(ui.board, ui.palette, { tap: onBoardTap, move: onBoardMove, rotate, resize: resizeLive, resizeEnd, arm, drop });
 
 // Tapping empty space outside the board and panels dismisses the selection, palette and grid popup.
 document.addEventListener('pointerdown', event => {
@@ -206,22 +264,13 @@ document.addEventListener('pointerdown', event => {
 });
 
 ui.name.addEventListener('input', () => {
-  store.levels[state.index] = { ...store.levels[state.index], name: ui.name.value };
+  store.levels[store.current] = { ...store.levels[store.current], name: ui.name.value };
   store.save();
 });
 ui.edit.addEventListener('click', () => setMode(false));
 ui.play.addEventListener('click', () => setMode(true));
 ui.size.addEventListener('click', () => {
   state.isGridOpen = !state.isGridOpen;
-  render();
-});
-
-ui.palette.addEventListener('click', event => {
-  const type = event.target.closest('[data-type]')?.dataset.type;
-  if (!type) return;
-  const wasArmed = state.armed;
-  clearTransient(); // another palette button cancels a half-placed twin pair
-  state.armed = wasArmed === type ? null : type;
   render();
 });
 
@@ -235,12 +284,12 @@ ui.reset.addEventListener('click', () => {
   render();
 });
 
-ui.prev.addEventListener('click', () => showLevel(state.index - 1));
-ui.next.addEventListener('click', () => showLevel(state.index + 1));
+ui.prev.addEventListener('click', () => showLevel(store.current - 1));
+ui.next.addEventListener('click', () => showLevel(store.current + 1));
 $('new-btn').addEventListener('click', () => showLevel(store.add(newLevel())));
-$('duplicate-btn').addEventListener('click', () => showLevel(store.duplicate(state.index)));
+$('duplicate-btn').addEventListener('click', () => showLevel(store.duplicate(store.current)));
 $('delete-btn').addEventListener('click', () => {
-  if (confirm(`Delete "${level().name}"?`)) showLevel(store.remove(state.index));
+  if (confirm(`Delete "${level().name}"?`)) showLevel(store.remove(store.current));
 });
 $('export-btn').addEventListener('click', exportLevels);
 $('import-btn').addEventListener('click', () => ui.importFile.click());
