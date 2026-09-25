@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Elevator Levels</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -11,7 +11,10 @@
     <header class="header">
       <div class="title-row">
         <h1>Elevator Levels</h1>
-        <span id="lane" class="lane" role="status"></span>
+        <div class="pills">
+          <span id="moves" class="lane" role="status" title="Fewest Play moves to solve the edited level"></span>
+          <span id="lane" class="lane" role="status"></span>
+        </div>
       </div>
       <div class="header-row">
         <input id="name" aria-label="Level name" autocomplete="off">

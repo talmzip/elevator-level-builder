@@ -26,7 +26,6 @@ export function initBoard(el, paletteEl, boardHandlers) {
     target.addEventListener('pointermove', onMove);
     target.addEventListener('pointerup', onUp);
     target.addEventListener('pointercancel', onCancel);
-    target.addEventListener('contextmenu', event => event.preventDefault()); // long-press belongs to us
   }
 }
 

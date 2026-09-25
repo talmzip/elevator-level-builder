@@ -17,6 +17,11 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
+/* An app, not a page: no pinch or double-tap zoom, no text selection or long-press callout (the name field excepted) */
+html { touch-action: pan-x pan-y; }
+body { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+#name { user-select: text; -webkit-user-select: text; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -49,8 +54,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 
 /* Header */
-.title-row { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.header h1 { margin: 0; font-size: 20px; }
+.pills { display: flex; gap: 6px; }
+.title-row { margin-bottom: 8px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.header h1 { margin: 0; font-size: 20px; white-space: nowrap; }
 /* Whether the kid's column up to the exit is free */
 .lane {
   padding: 3px 10px;
@@ -61,6 +67,9 @@ button:disabled { opacity: 0.4; cursor: default; }
   font-weight: 600;
   white-space: nowrap;
 }
+.lane:empty { display: none; }
+/* Fewest moves: information, not a pass / fail state */
+#moves:not(.blocked) { background: var(--surface); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
 .lane.blocked { background: color-mix(in srgb, var(--danger) 12%, #fff); color: var(--danger); }
 .header-row { display: flex; gap: 8px; }
 #name {
@@ -91,9 +100,6 @@ button:disabled { opacity: 0.4; cursor: default; }
   background: linear-gradient(to right, var(--line) 1px, transparent 1px) 0 0 / var(--cell) var(--cell),
     linear-gradient(to bottom, var(--line) 1px, transparent 1px) 0 0 / var(--cell) var(--cell) #fafaf9;
   touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
 }
 /* One-cell gap in the top wall, above the kid's column */
 .exit {
@@ -200,7 +206,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .side { display: flex; flex-direction: column; gap: 12px; }
 .palette, .play-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 /* Palette buttons drag onto the board */
-.palette { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.palette { touch-action: none; }
 .play-tools { grid-template-columns: 1fr 1fr; }
 .palette button {
   height: 64px;

@@ -10,7 +10,7 @@ const FLASH_MS = 1800;
 
 const $ = id => document.getElementById(id);
 const ui = {
-  name: $('name'), lane: $('lane'), edit: $('edit-btn'), play: $('play-btn'), size: $('size-btn'),
+  name: $('name'), lane: $('lane'), moves: $('moves'), edit: $('edit-btn'), play: $('play-btn'), size: $('size-btn'),
   stage: $('stage'), board: $('board'), solved: $('solved'), side: $('side'),
   palette: $('palette'), playTools: $('play-tools'), undo: $('undo-btn'), reset: $('reset-btn'), hint: $('hint'),
   prev: $('prev-btn'), next: $('next-btn'), position: $('position'),
@@ -26,6 +26,7 @@ const state = {
   isResizeBlocked: false, // the last live resize step had no room, so the release snaps back
 };
 let flashTimer = null;
+let solver = null; // { key, worker } for the level whose fewest moves is being searched or shown
 
 const level = () => (state.play ? state.play.level : store.levels[store.current]);
 
@@ -191,10 +192,13 @@ function setMode(isPlay) {
   render();
 }
 
+// In Play, the arrows move to the next level's playtest, so a whole set can be played without Edit.
 function showLevel(index) {
   ui.name.blur(); // let render show the new level's name
   clearTransient();
   store.open(index);
+  const shown = store.levels[index];
+  if (state.play) state.play = { level: shown, start: shown, history: [] };
   render();
 }
 
@@ -241,10 +245,11 @@ function render() {
   renderHint();
 
   ui.position.textContent = `Level ${store.current + 1} of ${store.levels.length}`;
-  ui.prev.disabled = isPlay || store.current === 0;
-  ui.next.disabled = isPlay || store.current === store.levels.length - 1;
+  ui.prev.disabled = store.current === 0;
+  ui.next.disabled = store.current === store.levels.length - 1;
   for (const button of ui.actions.querySelectorAll('button')) button.disabled = isPlay;
   ui.solved.hidden = !(isPlay && isSolved(current));
+  renderMoves();
 
   drawBoard();
   const selected = state.selectedId && getPiece(current, state.selectedId);
@@ -263,6 +268,31 @@ function drawBoard(ghost = null) {
   const isClear = laneClear(current);
   ui.lane.textContent = isClear ? 'Lane clear' : 'Lane blocked';
   ui.lane.classList.toggle('blocked', !isClear);
+}
+
+// Fewest moves for the edited level, searched in a worker. An edit cancels the search for the previous arrangement.
+function renderMoves() {
+  const edited = store.levels[store.current];
+  const { rows, cols, kid, pieces } = edited;
+  const key = JSON.stringify({ rows, cols, kid, pieces });
+  if (solver?.key === key) return;
+  solver?.worker.terminate();
+  const worker = new Worker(new URL('./solver-worker.js', import.meta.url), { type: 'module' });
+  solver = { key, worker };
+  showMoves('Solving…', false);
+  worker.addEventListener('message', ({ data }) => {
+    worker.terminate();
+    if (data.moves) showMoves(`Min ${data.moves} move${data.moves === 1 ? '' : 's'}`, false);
+    else if (data.atLeast) showMoves(`Min ${data.atLeast}+ moves`, false);
+    else showMoves('Unsolvable', true);
+  });
+  worker.addEventListener('error', () => showMoves('', false));
+  worker.postMessage(edited);
+}
+
+function showMoves(text, isBad) {
+  ui.moves.textContent = text;
+  ui.moves.classList.toggle('blocked', isBad);
 }
 
 initBoard(ui.board, ui.palette, { tap: onBoardTap, move: onBoardMove, rotate, resize: resizeLive, resizeEnd, arm, drop });
@@ -313,6 +343,14 @@ ui.importFile.addEventListener('change', () => {
   ui.importFile.value = '';
   if (file) importLevels(file);
 });
+
+// No zoom: iOS ignores user-scalable=no, so its pinch gestures are cancelled here; ctrl+wheel is a trackpad pinch.
+const noZoom = event => event.preventDefault();
+document.addEventListener('gesturestart', noZoom);
+document.addEventListener('gesturechange', noZoom);
+document.addEventListener('touchmove', event => event.touches.length > 1 && event.preventDefault(), { passive: false });
+document.addEventListener('wheel', event => event.ctrlKey && event.preventDefault(), { passive: false });
+document.addEventListener('contextmenu', event => event.target !== ui.name && event.preventDefault());
 
 window.addEventListener('resize', render);
 render();
