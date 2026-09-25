@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Elevator Levels</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <h1>Elevator Levels</h1>
+      <div class="header-row">
+        <input id="name" aria-label="Level name" autocomplete="off">
+        <div class="toggle">
+          <button id="edit-btn" type="button">Edit</button>
+          <button id="play-btn" type="button">Play</button>
+        </div>
+        <button id="size-btn" type="button" aria-label="Grid size"></button>
+      </div>
+    </header>
+
+    <section id="stage" class="stage">
+      <div id="board" class="board"></div>
+      <div id="solved" class="solved" hidden>Solved!</div>
+    </section>
+
+    <section id="side" class="side">
+      <div>
+        <div id="palette" class="palette">
+          <button type="button" data-type="rigid"><span class="icon"><i class="rigid"></i></span>Rigid</button>
+          <button type="button" data-type="accordion"><span class="icon"><i class="accordion"></i></span>Accordion</button>
+          <button type="button" data-type="twin"><span class="icon"><i class="twin"></i><i class="twin"></i></span>Twins</button>
+          <button type="button" data-type="turner"><span class="icon"><i class="turner"></i></span>Turner</button>
+        </div>
+        <div id="play-tools" class="play-tools" hidden>
+          <button id="undo-btn" type="button">Undo</button>
+          <button id="reset-btn" type="button">Reset</button>
+        </div>
+        <p id="hint" class="hint"></p>
+      </div>
+
+      <nav class="nav">
+        <button id="prev-btn" type="button" aria-label="Previous level">‹</button>
+        <span id="position"></span>
+        <button id="next-btn" type="button" aria-label="Next level">›</button>
+      </nav>
+
+      <div id="actions" class="actions">
+        <button id="new-btn" type="button">New</button>
+        <button id="duplicate-btn" type="button">Duplicate</button>
+        <button id="delete-btn" type="button" class="danger">Delete</button>
+        <button id="export-btn" type="button">Export</button>
+        <button id="import-btn" type="button">Import</button>
+      </div>
+      <input id="import-file" type="file" accept=".json,application/json" hidden>
+    </section>
+  </main>
+
+  <div id="piece-popup" class="popup" hidden></div>
+  <div id="grid-popup" class="popup grid-popup" hidden></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
