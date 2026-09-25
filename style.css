@@ -54,7 +54,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 
 /* Header */
-.pills { display: flex; gap: 6px; }
+/* Own line on phones so the header height never changes with the pill texts */
+.pills { flex-basis: 100%; display: flex; gap: 6px; }
+@media (min-width: 720px) { .pills { flex-basis: auto; } }
 .title-row { margin-bottom: 8px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .header h1 { margin: 0; font-size: 20px; white-space: nowrap; }
 /* Whether the kid's column up to the exit is free */
@@ -232,6 +234,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 /* Navigation and actions */
 .nav { display: flex; align-items: center; justify-content: space-between; }
 .nav button { width: 44px; padding: 0; font-size: 22px; }
+/* "Level 3 of 8" opens the level list */
+.nav .position { width: auto; padding: 0 14px; font-size: 15px; border-style: dashed; }
 .actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .actions button { padding: 0 2px; font-size: 13px; }
 
@@ -259,6 +263,57 @@ button:disabled { opacity: 0.4; cursor: default; }
 .stepper button { padding: 0; }
 .stepper output { text-align: center; }
 
+/* New menu */
+.menu-popup { width: 180px; gap: 6px; }
+
+/* Bottom sheets: level list and generator. Beside the board on wider screens */
+.sheet {
+  position: fixed;
+  z-index: 9;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-width: 560px;
+  max-height: 55vh;
+  margin: 0 auto;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -8px 24px rgb(0 0 0 / 0.12);
+}
+.sheet-header { display: flex; align-items: center; justify-content: space-between; }
+.sheet h2 { margin: 0; font-size: 16px; }
+.sheet .stepper { grid-template-columns: 1fr 44px 32px 44px; }
+.level-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.level-row {
+  min-height: 44px;
+  padding: 0 0 0 10px;
+  display: grid;
+  grid-template-columns: 28px 1fr auto 44px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.level-row.current { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.level-row.dragging { opacity: 0.7; background: var(--bg); }
+.level-row .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.level-row .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.level-row .moves { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.grip { height: 44px; display: grid; place-items: center; color: var(--muted); font-size: 20px; cursor: grab; touch-action: none; }
+.type-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.type-chip { height: 56px; padding: 0 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; }
+.type-chip[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.type-chip[aria-pressed="false"] .icon { opacity: 0.35; }
+.gen-status { margin: 0; min-height: 2.6em; color: var(--muted); font-size: 13px; }
+.gen-status.bad { color: var(--danger); }
+
 /* Wider screens: tools beside the board */
 @media (min-width: 720px) {
   .app {
@@ -269,6 +324,7 @@ button:disabled { opacity: 0.4; cursor: default; }
     column-gap: 24px;
   }
   .header { grid-area: header; }
+  .sheet { left: auto; right: 16px; bottom: 16px; width: 320px; max-height: calc(100vh - 32px); border-radius: 16px; }
   .stage { grid-area: stage; }
   .side { grid-area: side; }
 }

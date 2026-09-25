@@ -32,14 +32,28 @@ export function open(index) {
   save();
 }
 
-// Each list op saves and returns the index to show next.
-export function add(level) {
-  levels.push(level);
+// Each list op saves and returns the index to show next. New levels go right after the given one.
+export function insertAfter(index, level) {
+  levels.splice(index + 1, 0, level);
   save();
-  return levels.length - 1;
+  return index + 1;
 }
 
-export const duplicate = index => add({ ...levels[index], id: newId(), name: `${levels[index].name} copy` });
+export const duplicate = index => insertAfter(index, { ...levels[index], id: newId(), name: `${levels[index].name} copy` });
+
+export function replace(index, level) {
+  levels[index] = level;
+  save();
+  return index;
+}
+
+// Moves a level to another place in the order; the open level stays open wherever it lands.
+export function move(from, to) {
+  const open = levels[current];
+  levels.splice(to, 0, ...levels.splice(from, 1));
+  current = levels.indexOf(open);
+  save();
+}
 
 // The last level is cleared instead of removed.
 export function remove(index) {

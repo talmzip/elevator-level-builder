@@ -3,10 +3,15 @@ import { abilityStep, fitResized, fitSpots, fits, isSolved, laneClear, moveTo, r
 import { createPiece, getPiece, newLevel, nextPieceId, withPiece, withoutPiece } from './model.js';
 import * as store from './store.js';
 import { initBoard, pieceElement, renderBoard, shake } from './board.js';
-import { renderGridPopup, renderPiecePopup } from './popups.js';
+import { renderGridPopup, renderMenuPopup, renderPiecePopup } from './popups.js';
+import { initMoves, movesOf, movesText, wantMoves } from './moves.js';
+import { renderGeneratorSheet, renderLevelsSheet, sheetTop } from './sheets.js';
+import { checkRequest } from './generator.js';
 
 const EXIT_DEPTH = 0.6; // exit strip above the board, in cells (matches .stage padding in style.css)
 const FLASH_MS = 1800;
+const POOL_SIZE = 5; // generated levels kept ready
+const SEARCH_WORKERS = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -14,7 +19,7 @@ const ui = {
   stage: $('stage'), board: $('board'), solved: $('solved'), side: $('side'),
   palette: $('palette'), playTools: $('play-tools'), undo: $('undo-btn'), reset: $('reset-btn'), hint: $('hint'),
   prev: $('prev-btn'), next: $('next-btn'), position: $('position'),
-  actions: $('actions'), importFile: $('import-file'),
+  actions: $('actions'), newButton: $('new-btn'), importFile: $('import-file'),
 };
 
 const state = {
@@ -24,9 +29,11 @@ const state = {
   pendingTwin: null, // first twin placed, waiting for its partner (not saved until paired)
   isGridOpen: false,
   isResizeBlocked: false, // the last live resize step had no room, so the release snaps back
+  isNewOpen: false, // the New menu: empty level or generate
+  isListOpen: false, // the levels sheet
+  gen: null, // the generator sheet: { request, pool, workers, tried, hardest, isRunning, lastFound, pending }
 };
 let flashTimer = null;
-let solver = null; // { key, worker } for the level whose fewest moves is being searched or shown
 
 const level = () => (state.play ? state.play.level : store.levels[store.current]);
 
@@ -186,6 +193,8 @@ function setMode(isPlay) {
   if (isPlay === Boolean(state.play)) return;
   clearTransient();
   state.isGridOpen = false;
+  state.isNewOpen = false;
+  closeGenerator();
   const edited = store.levels[store.current];
   // Levels are immutable, so the edited level itself is the snapshot Edit returns to.
   state.play = isPlay ? { level: edited, start: edited, history: [] } : null;
@@ -218,11 +227,16 @@ async function importLevels(file) {
   }
 }
 
-// Largest cell that fits the board (plus exit strip) beside or above the tools without scrolling.
+// Largest cell that fits the board (plus exit strip) beside or above the tools, and above an open sheet that
+// spans it, without scrolling.
 function cellSize(current) {
   const isSideBelow = ui.side.offsetTop > ui.stage.offsetTop;
   const reserved = isSideBelow ? ui.side.offsetHeight + 24 : 16;
-  const height = window.innerHeight - ui.stage.getBoundingClientRect().top - reserved;
+  const stage = ui.stage.getBoundingClientRect();
+  const sheet = sheetTop();
+  const isCovered = sheet && sheet.left < stage.right && sheet.right > stage.left;
+  const bottom = isCovered ? Math.min(sheet.top - 12, window.innerHeight - reserved) : window.innerHeight - reserved;
+  const height = bottom - stage.top;
   const width = ui.stage.clientWidth - 4; // board border
   return Math.max(24, Math.floor(Math.min(width / current.cols, height / (current.rows + EXIT_DEPTH))));
 }
@@ -249,7 +263,11 @@ function render() {
   ui.next.disabled = store.current === store.levels.length - 1;
   for (const button of ui.actions.querySelectorAll('button')) button.disabled = isPlay;
   ui.solved.hidden = !(isPlay && isSolved(current));
+  const edited = store.levels[store.current];
+  wantMoves([edited, ...(state.isListOpen ? store.levels : [])]);
   renderMoves();
+  renderMenuPopup(state.isNewOpen ? { anchor: ui.newButton, items: [['Empty level', addEmpty], ['Generate…', openGenerator]] } : null);
+  renderSheets();
 
   drawBoard();
   const selected = state.selectedId && getPiece(current, state.selectedId);
@@ -270,30 +288,160 @@ function drawBoard(ghost = null) {
   ui.lane.classList.toggle('blocked', !isClear);
 }
 
-// Fewest moves for the edited level, searched in a worker. An edit cancels the search for the previous arrangement.
+// Fewest moves for the edited level (winning move excluded), from the moves cache.
 function renderMoves() {
-  const edited = store.levels[store.current];
-  const { rows, cols, kid, pieces } = edited;
-  const key = JSON.stringify({ rows, cols, kid, pieces });
-  if (solver?.key === key) return;
-  solver?.worker.terminate();
-  const worker = new Worker(new URL('./solver-worker.js', import.meta.url), { type: 'module' });
-  solver = { key, worker };
-  showMoves('Solving…', false);
-  worker.addEventListener('message', ({ data }) => {
-    worker.terminate();
-    if (data.moves) showMoves(`Min ${data.moves} move${data.moves === 1 ? '' : 's'}`, false);
-    else if (data.atLeast) showMoves(`Min ${data.atLeast}+ moves`, false);
-    else showMoves('Unsolvable', true);
-  });
-  worker.addEventListener('error', () => showMoves('', false));
-  worker.postMessage(edited);
-}
-
-function showMoves(text, isBad) {
-  ui.moves.textContent = text;
+  const result = movesOf(store.levels[store.current]);
+  const isBad = result?.moves === null && result.atLeast === undefined;
+  const count = movesText(result);
+  ui.moves.textContent = !result ? 'Solving…' : result.error ? '' : isBad ? 'Unsolvable' : `Min ${count} move${count === '1' ? '' : 's'}`;
   ui.moves.classList.toggle('blocked', isBad);
 }
+
+function renderSheets() {
+  renderLevelsSheet(state.isListOpen ? {
+    levels: store.levels,
+    current: store.current,
+    movesText: level => movesText(movesOf(level)),
+    open: index => {
+      state.isListOpen = false;
+      showLevel(index);
+    },
+    move: (from, to) => {
+      store.move(from, to);
+      render();
+    },
+    close: () => {
+      state.isListOpen = false;
+      render();
+    },
+  } : null);
+  const gen = state.gen;
+  renderGeneratorSheet(gen && {
+    request: gen.request,
+    status: generatorStatus(gen),
+    canGenerate: !checkRequest(gen.request).length && (gen.pool.length > 0 || gen.isRunning),
+    canAgain: Boolean(store.levels[store.current].gen) && !checkRequest(gen.request).length && (gen.pool.length > 0 || gen.isRunning),
+    set: setRequest,
+    generate: () => takeGenerated('new'),
+    again: () => takeGenerated('again'),
+    close: closeGenerator,
+  });
+}
+
+function addEmpty() {
+  state.isNewOpen = false;
+  showLevel(store.insertAfter(store.current, newLevel()));
+}
+
+// Generator (design § 5 → Generator): parallel workers search the request and fill a pool of ready levels; Generate and
+// Again take from it at once. Any input change restarts the search.
+function openGenerator() {
+  state.isNewOpen = false;
+  const current = store.levels[store.current];
+  const request = current.gen ?? { rows: current.rows, cols: current.cols, moves: 5, types: ['rigid'] };
+  state.gen = { request, pool: [], workers: [], tried: [], hardest: -1, isRunning: false, lastFound: true, pending: null };
+  startSearch();
+  render();
+}
+
+function closeGenerator() {
+  if (!state.gen) return;
+  stopSearch();
+  state.gen = null;
+  render();
+}
+
+function setRequest(request) {
+  const gen = state.gen;
+  stopSearch();
+  Object.assign(gen, { request, pool: [], hardest: -1, lastFound: true, pending: null });
+  startSearch();
+  render();
+}
+
+function startSearch() {
+  const gen = state.gen;
+  if (checkRequest(gen.request).length) return;
+  gen.isRunning = true;
+  gen.tried = [];
+  let running = SEARCH_WORKERS;
+  let found = 0;
+  gen.workers = Array.from({ length: SEARCH_WORKERS }, (_, n) => {
+    const worker = new Worker(new URL('./generator-worker.js', import.meta.url), { type: 'module' });
+    worker.addEventListener('message', ({ data }) => {
+      if (state.gen !== gen || !gen.workers.includes(worker)) return;
+      if (data.type === 'level') {
+        found++;
+        gen.pool.push(data.level);
+        if (gen.pending) takeGenerated(gen.pending);
+        if (gen.pool.length >= POOL_SIZE) finishSearch(found);
+      } else if (data.type === 'progress') {
+        gen.tried[n] = data.tried;
+        gen.hardest = Math.max(gen.hardest, data.hardest);
+      } else if (data.type === 'done' && --running === 0) {
+        finishSearch(found);
+      }
+      renderSheets();
+    });
+    worker.addEventListener('error', () => {
+      if (--running === 0) finishSearch(found);
+    });
+    worker.postMessage(gen.request);
+    return worker;
+  });
+}
+
+function finishSearch(found) {
+  const gen = state.gen;
+  stopSearch();
+  gen.lastFound = found > 0;
+  gen.pending = null;
+  render();
+}
+
+function stopSearch() {
+  const gen = state.gen;
+  gen.workers.forEach(worker => worker.terminate());
+  gen.workers = [];
+  gen.isRunning = false;
+}
+
+// A ready level as a new level after the current one ('new') or in place of the current one ('again'). With none
+// ready yet, waits for the search. Refills the pool in the background while the last run found levels.
+function takeGenerated(kind) {
+  const gen = state.gen;
+  const level = gen.pool.shift();
+  if (!level) {
+    gen.pending = kind;
+    return renderSheets();
+  }
+  gen.pending = null;
+  showLevel(kind === 'new' ? store.insertAfter(store.current, level) : store.replace(store.current, level));
+  if (!gen.isRunning && gen.lastFound) startSearch();
+}
+
+function generatorStatus(gen) {
+  const problems = checkRequest(gen.request);
+  if (problems.length) return { text: problems.join(' '), isBad: true };
+  const tried = gen.tried.reduce((sum, n) => sum + (n || 0), 0);
+  const hardest = gen.hardest >= 0 ? ` · hardest seen ${gen.hardest}` : '';
+  if (gen.pending) return { text: `Generating… ${tried} layouts tried${hardest}`, isBad: false };
+  if (gen.pool.length) return { text: `✓ ${gen.pool.length} ready${gen.isRunning ? ', finding more…' : ''}`, isBad: false };
+  if (gen.isRunning) return { text: `Searching… ${tried} layouts tried${hardest}`, isBad: false };
+  if (gen.hardest >= gen.request.moves) {
+    return { text: 'None found where every chosen creature is needed. Try fewer creatures or another grid size.', isBad: true };
+  }
+  return {
+    text: gen.hardest < 0 ? 'Not found — no solvable layouts. Grow the grid or pick other creatures.'
+      : `Not found — hardest seen: ${gen.hardest} moves. Grow the grid, add creature types or lower the moves.`,
+    isBad: true,
+  };
+}
+
+initMoves(() => {
+  renderMoves();
+  renderSheets();
+});
 
 initBoard(ui.board, ui.palette, { tap: onBoardTap, move: onBoardMove, rotate, resize: resizeLive, resizeEnd, arm, drop });
 
@@ -301,9 +449,11 @@ initBoard(ui.board, ui.palette, { tap: onBoardTap, move: onBoardMove, rotate, re
 document.addEventListener('pointerdown', event => {
   const target = event.target;
   const closesGrid = state.isGridOpen && !target.closest('#grid-popup, #size-btn');
-  const clearsSelection = (state.selectedId || state.armed || state.pendingTwin) && !target.closest('#board, #piece-popup, #palette, #grid-popup');
-  if (!closesGrid && !clearsSelection) return;
+  const closesNew = state.isNewOpen && !target.closest('#menu-popup, #new-btn');
+  const clearsSelection = (state.selectedId || state.armed || state.pendingTwin) && !target.closest('#board, #piece-popup, #palette, #grid-popup, .sheet');
+  if (!closesGrid && !closesNew && !clearsSelection) return;
   if (closesGrid) state.isGridOpen = false;
+  if (closesNew) state.isNewOpen = false;
   if (clearsSelection) clearTransient();
   render();
 });
@@ -331,7 +481,14 @@ ui.reset.addEventListener('click', () => {
 
 ui.prev.addEventListener('click', () => showLevel(store.current - 1));
 ui.next.addEventListener('click', () => showLevel(store.current + 1));
-$('new-btn').addEventListener('click', () => showLevel(store.add(newLevel())));
+ui.position.addEventListener('click', () => {
+  state.isListOpen = !state.isListOpen;
+  render();
+});
+ui.newButton.addEventListener('click', () => {
+  state.isNewOpen = !state.isNewOpen;
+  render();
+});
 $('duplicate-btn').addEventListener('click', () => showLevel(store.duplicate(store.current)));
 $('delete-btn').addEventListener('click', () => {
   if (confirm(`Delete "${level().name}"?`)) showLevel(store.remove(store.current));

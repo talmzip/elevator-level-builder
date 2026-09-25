@@ -3,6 +3,7 @@ import { maxSide, maxTurnerLength, resize, twinTransfer } from './rules.js';
 
 const piecePopup = document.getElementById('piece-popup');
 const gridPopup = document.getElementById('grid-popup');
+const menuPopup = document.getElementById('menu-popup');
 const GAP = 8;
 
 function el(tag, className, text = '') {
@@ -114,4 +115,12 @@ export function renderGridPopup(view) {
     button('Done', close, 'primary'),
   );
   place(gridPopup, anchor.getBoundingClientRect());
+}
+
+// view: { anchor, items: [[label, onClick], …] } or null to hide.
+export function renderMenuPopup(view) {
+  menuPopup.hidden = !view;
+  if (!view) return;
+  menuPopup.replaceChildren(...view.items.map(([label, onClick]) => button(label, onClick)));
+  place(menuPopup, view.anchor.getBoundingClientRect());
 }
