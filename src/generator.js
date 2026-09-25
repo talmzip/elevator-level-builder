@@ -2,7 +2,7 @@
 // (winning move excluded) and the creature types that must take part. Random layouts of those types are explored
 // in full; any arrangement exactly `moves` from the exit whose every fewest-move solution moves each type is a
 // level. Too easy or too open adds a creature, stuck removes one. Pure, no DOM.
-import { accordionStates, axisOf, fitSpots, maxSide, maxTurnerLength, moveTo, rectOf, resize } from './rules.js';
+import { accordionStates, axisOf, exitCol, fitSpots, maxSide, maxTurnerLength, moveTo, rectOf, resize } from './rules.js';
 import { newId } from './model.js';
 import { explore, isTypeNeeded } from './solver.js';
 
@@ -68,7 +68,7 @@ function blocksForever(piece, kidCol) {
 // count creatures (a twin pair is one) of the requested types, each type at least once, at random free spots.
 // Null when one doesn't fit.
 function randomLayout({ rows, cols, types }, count) {
-  let level = { rows, cols, kid: { row: rows - 1, col: random(cols) }, pieces: [] };
+  let level = { rows, cols, kid: { row: rows - 1, col: exitCol(cols) }, pieces: [] };
   const chosen = [...types, ...Array.from({ length: Math.max(0, count - types.length) }, () => pick(types))];
   chosen.forEach((type, n) => {
     if (!level) return;

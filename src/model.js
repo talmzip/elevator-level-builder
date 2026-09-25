@@ -1,5 +1,5 @@
 // Level shape (design § 6): factories, palette defaults, ids, immutable edits, validation.
-import { allPieces, fits, kidPiece } from './rules.js';
+import { allPieces, exitCol, fits, kidPiece } from './rules.js';
 
 export const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -8,7 +8,7 @@ export const newLevel = (rows = 6, cols = 6) => ({
   name: 'Untitled',
   rows,
   cols,
-  kid: { row: rows - 1, col: Math.floor(cols / 2) },
+  kid: { row: rows - 1, col: exitCol(cols) },
   pieces: [],
 });
 
@@ -28,6 +28,16 @@ export function nextPieceId(level, offset = 0) {
 }
 
 export const getPiece = (level, id) => (id === 'kid' ? kidPiece(level) : level.pieces.find(piece => piece.id === id));
+
+// Levels from before the exit column was fixed: the kid moved into it, at the free row nearest its own.
+// Unchanged when it's already there or the column has no free cell.
+export function withKidCentred(level) {
+  const col = exitCol(level.cols);
+  if (level.kid.col === col) return level;
+  const rows = [...Array(level.rows).keys()].sort((a, b) => Math.abs(a - level.kid.row) - Math.abs(b - level.kid.row));
+  const row = rows.find(r => fits(level, { ...kidPiece(level), row: r, col }));
+  return row === undefined ? level : { ...level, kid: { row, col } };
+}
 
 // Copy of the level with these pieces replaced by id, or appended when new.
 export function withPiece(level, ...pieces) {

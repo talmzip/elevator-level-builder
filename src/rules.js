@@ -11,6 +11,8 @@ export const allPieces = level => [kidPiece(level), ...level.pieces];
 export const moveTo = (piece, row, col) => ({ ...piece, row, col });
 export const inBounds = (level, row, col) => row >= 0 && row < level.rows && col >= 0 && col < level.cols;
 export const isSolved = level => level.kid.row < 0;
+// The exit (and so the kid) always sits in the centre column, right of centre on an even width.
+export const exitCol = cols => Math.floor(cols / 2);
 
 // Footprint rectangle; a piece's position is its top-left cell.
 export function rectOf(piece) {
@@ -234,11 +236,11 @@ function shrunk(piece) {
   return piece.h > 1 ? resize(piece, piece.w, piece.h - 1) : null;
 }
 
-// The level on a new grid size; never blocks. The kid is clamped inside. Each piece is capped to the size limits
+// The level on a new grid size; never blocks. The kid moves to the new exit column, its row clamped inside. Each piece is capped to the size limits
 // and moved to the nearest free spot (pieces already inside go first, so they keep their cells). With no spot free
 // it shrinks a step and retries; only at minimum size is it dropped, and a twin then takes its partner with it.
 export function regrid(level, rows, cols) {
-  const kid = { row: clamp(level.kid.row, 0, rows - 1), col: clamp(level.kid.col, 0, cols - 1) };
+  const kid = { row: clamp(level.kid.row, 0, rows - 1), col: exitCol(cols) };
   let next = { ...level, rows, cols, kid, pieces: [] };
   const isInside = piece => {
     const { row, col, w, h } = rectOf(piece);

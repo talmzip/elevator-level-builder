@@ -209,12 +209,13 @@ function dragEdge(dx, dy) {
   handlers.resize(drag.original, resizedFromEdge(view.level, drag.original, drag.edge, cells));
 }
 
-// Edit: any cell, green or red. Play: along the axis up to the first obstacle, so always legal.
+// Edit: any cell, green or red; the kid only up and down, as the exit column is fixed. Play: along the axis up to the
+// first obstacle, so always legal.
 function dragPiece(dx, dy) {
   const piece = getPiece(view.level, drag.id);
   drag.to = view.mode === 'play'
     ? slid(piece, dx, dy)
-    : moveTo(piece, piece.row + Math.round(dy / cell), piece.col + Math.round(dx / cell));
+    : moveTo(piece, piece.row + Math.round(dy / cell), piece.type === 'kid' ? piece.col : piece.col + Math.round(dx / cell));
   drag.isValid = view.mode === 'play' || fits(view.level, drag.to);
   showGhost(drag.to, drag.isValid);
 }

@@ -1,5 +1,5 @@
 // All levels in localStorage under one key, in the export shape plus the open level: { version, levels, current }.
-import { isValidLevel, newId, newLevel } from './model.js';
+import { isValidLevel, newId, newLevel, withKidCentred } from './model.js';
 
 const KEY = 'elevator-level-builder';
 const VERSION = 1;
@@ -10,7 +10,7 @@ export const levels = load();
 function load() {
   try {
     const data = JSON.parse(localStorage.getItem(KEY));
-    const stored = data?.version === VERSION && Array.isArray(data.levels) ? data.levels.filter(isValidLevel) : [];
+    const stored = data?.version === VERSION && Array.isArray(data.levels) ? data.levels.filter(isValidLevel).map(withKidCentred) : [];
     if (stored.length) {
       current = Number.isInteger(data.current) && stored[data.current] ? data.current : 0;
       return stored;
@@ -69,7 +69,7 @@ export function importJson(text) {
   if (data?.version !== VERSION || !Array.isArray(data.levels) || !data.levels.length || !data.levels.every(isValidLevel)) {
     throw new Error('invalid level file');
   }
-  for (const level of data.levels) levels.push({ ...level, id: newId() });
+  for (const level of data.levels) levels.push({ ...withKidCentred(level), id: newId() });
   save();
   return data.levels.length;
 }
