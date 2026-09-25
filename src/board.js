@@ -1,6 +1,6 @@
-// Board: draws grid, exit, pieces, drag ghosts and the selected piece's edge handles. Turns pointer input on the
-// board and the palette into taps, moves, slides, edge resizes, long-press rotations and palette drops.
-import { allPieces, axisOf, fits, moveTo, rectOf, resizedFromEdge, slideRange } from './rules.js';
+// Board: draws grid, exit, pieces, hint dots, drag ghosts and the selected piece's edge handles. Turns pointer input
+// on the board and the palette into taps, moves, slides, edge resizes, long-press rotations and palette drops.
+import { allPieces, axisOf, cellsOf, fits, moveTo, rectOf, resizedFromEdge, slideRange } from './rules.js';
 import { createPiece, getPiece } from './model.js';
 
 const TAP_SLOP = 8; // px a pointer may travel and still count as a tap
@@ -11,7 +11,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 let boardEl;
 let handlers;
-let view; // { level, mode, selectedId, pendingId, ghost }
+let view; // { level, mode, selectedId, pendingId, ghost, dots: { type, spots } | null }
 let cell;
 let drag = null;
 
@@ -57,7 +57,8 @@ function draw() {
   exit.textContent = 'EXIT';
   exit.style.left = `${level.kid.col * cell}px`;
   const selected = view.mode === 'edit' && view.selectedId !== 'kid' && getPiece(level, view.selectedId);
-  boardEl.replaceChildren(exit, twinLinks(level), ...allPieces(level).map(pieceEl), ...(selected ? handlesOf(selected) : []));
+  const dots = view.dots ? view.dots.spots.map(([row, col]) => dotEl(view.dots.type, row, col)) : [];
+  boardEl.replaceChildren(exit, twinLinks(level), ...allPieces(level).map(pieceEl), ...dots, ...(selected ? handlesOf(selected) : []));
   if (view.ghost) showGhost(view.ghost, false);
 }
 
@@ -83,6 +84,15 @@ function pieceEl(piece) {
     pivot.style.top = `${piece.orientation === 'h' ? across : along}px`;
     el.append(pivot);
   }
+  return el;
+}
+
+// A small tappable mark in the piece's colour, centred on a top-left cell the piece could take.
+function dotEl(type, row, col) {
+  const el = document.createElement('div');
+  el.className = `dot ${type}`;
+  el.style.left = `${(col + 0.5) * cell}px`;
+  el.style.top = `${(row + 0.5) * cell}px`;
   return el;
 }
 
@@ -145,21 +155,20 @@ function cellAt(event) {
   ];
 }
 
+const pieceAt = (row, col) => allPieces(view.level).find(piece => cellsOf(piece).some(([r, c]) => r === row && c === col))?.id ?? null;
+
 function onBoardDown(event) {
   if (drag) return; // one pointer at a time
   const edge = event.target.closest('.handle')?.dataset.edge;
-  const id = edge ? view.selectedId : event.target.closest('.piece')?.dataset.id ?? null;
+  const isDot = Boolean(event.target.closest('.dot'));
   const [row, col] = cellAt(event);
-  drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, id, edge, row, col, isMoving: false, to: null };
+  // A dot can sit on the selected piece in Play: tapping it is a dot tap, dragging it still drags the piece.
+  const id = edge ? view.selectedId : isDot ? pieceAt(row, col) : event.target.closest('.piece')?.dataset.id ?? null;
+  const canRotate = view.mode === 'edit' && !edge && !isDot && id && id !== 'kid' && id !== view.pendingId;
+  drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, time: event.timeStamp, id, edge, isDot, canRotate, row, col, isMoving: false, to: null };
   if (edge) {
     drag.original = getPiece(view.level, id);
     drag.cells = 0;
-  } else if (view.mode === 'edit' && id && id !== 'kid' && id !== view.pendingId) {
-    const press = drag;
-    press.timer = setTimeout(() => {
-      press.isRotated = true;
-      handlers.rotate(id);
-    }, LONG_PRESS_MS);
   }
   boardEl.setPointerCapture(event.pointerId);
 }
@@ -172,12 +181,11 @@ function onPaletteDown(event) {
 }
 
 function onMove(event) {
-  if (!drag || event.pointerId !== drag.pointerId || drag.isRotated) return;
+  if (!drag || event.pointerId !== drag.pointerId) return;
   const dx = event.clientX - drag.x;
   const dy = event.clientY - drag.y;
   if (!drag.isMoving && Math.hypot(dx, dy) < TAP_SLOP) return;
   drag.isMoving = true;
-  clearTimeout(drag.timer);
   if (drag.type) dragNew(event);
   else if (drag.edge) dragEdge(dx, dy);
   else if (drag.id) dragPiece(dx, dy);
@@ -221,11 +229,14 @@ function slid(piece, dx, dy) {
 
 function onUp(event) {
   if (!drag || event.pointerId !== drag.pointerId) return;
-  const { id, type, edge, row, col, isMoving, isRotated, to, isValid, timer } = drag;
-  clearTimeout(timer);
+  const { id, type, edge, isDot, canRotate, time, row, col, isMoving, to, isValid } = drag;
   drag = null;
-  if (isRotated) return;
-  if (!isMoving) return type ? handlers.arm(type) : handlers.tap(id, row, col);
+  if (!isMoving) {
+    if (type) return handlers.arm(type);
+    // Long-press rotates only on a lift without movement; moving after the hold was a drag.
+    if (canRotate && event.timeStamp - time >= LONG_PRESS_MS) return handlers.rotate(id);
+    return handlers.tap(isDot ? null : id, row, col);
+  }
   if (edge) return handlers.resizeEnd();
   if (to && isValid && type) return handlers.drop(type, to.row, to.col);
   const from = id && getPiece(view.level, id);
@@ -235,8 +246,7 @@ function onUp(event) {
 
 function onCancel(event) {
   if (!drag || event.pointerId !== drag.pointerId) return;
-  const { edge, timer } = drag;
-  clearTimeout(timer);
+  const { edge } = drag;
   drag = null;
   if (edge) handlers.resizeEnd();
   else draw();

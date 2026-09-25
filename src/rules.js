@@ -69,6 +69,24 @@ export function slideRange(level, piece) {
   return { min: -reach(-1), max: reach(1) };
 }
 
+// Top-left cell of every spot the piece can slide to along its axis (the kid's may be the exit, row −1).
+export function slideSpots(level, piece) {
+  const { min, max } = slideRange(level, piece);
+  const [dr, dc] = axisOf(piece) === 'h' ? [0, 1] : [1, 0];
+  const spots = [];
+  for (let steps = min; steps <= max; steps++) if (steps) spots.push([piece.row + steps * dr, piece.col + steps * dc]);
+  return spots;
+}
+
+// Every top-left cell where the piece fits.
+export function fitSpots(level, piece) {
+  const spots = [];
+  for (let row = 0; row < level.rows; row++) {
+    for (let col = 0; col < level.cols; col++) if (fits(level, moveTo(piece, row, col))) spots.push([row, col]);
+  }
+  return spots;
+}
+
 // New w×h anchored at the top-left cell. Axis = longer side; a square keeps its previous axis.
 export const resize = (piece, w, h) => ({ ...piece, w, h, axis: w === h ? piece.axis : w > h ? 'h' : 'v' });
 
@@ -203,10 +221,9 @@ export function rotated(piece) {
 
 // The spot nearest the piece's position (fewest cells away) where it fits, or null.
 function nearestFit(level, piece) {
-  const spots = [];
-  for (let row = 0; row < level.rows; row++) for (let col = 0; col < level.cols; col++) spots.push(moveTo(piece, row, col));
-  const distance = spot => Math.abs(spot.row - piece.row) + Math.abs(spot.col - piece.col);
-  return spots.sort((a, b) => distance(a) - distance(b)).find(spot => fits(level, spot)) ?? null;
+  const distance = ([row, col]) => Math.abs(row - piece.row) + Math.abs(col - piece.col);
+  const [spot] = fitSpots(level, piece).sort((a, b) => distance(a) - distance(b));
+  return spot ? moveTo(piece, ...spot) : null;
 }
 
 // One size step smaller (a block loses from its longer side), or null at the minimum.

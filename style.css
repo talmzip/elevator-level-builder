@@ -134,7 +134,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   background-size: var(--cell) var(--cell);
   background-position: -5px -5px;
 }
-.kid::before {
+.piece.kid::before {
   content: "";
   position: absolute;
   left: 50%;
@@ -152,6 +152,17 @@ button:disabled { opacity: 0.4; cursor: default; }
   translate: -50% -50%;
   border-radius: 50%;
   background: rgb(0 0 0 / 0.35);
+}
+/* Hint dots: where the armed piece fits (Edit) or the selected piece can slide (Play). Wide hit area, small mark */
+.dot { position: absolute; z-index: 3; width: calc(var(--cell) * 0.5); height: calc(var(--cell) * 0.5); translate: -50% -50%; display: grid; place-items: center; cursor: pointer; }
+.dot::after {
+  content: "";
+  width: max(8px, calc(var(--cell) * 0.2));
+  aspect-ratio: 1;
+  border: 2px solid color-mix(in srgb, var(--c), #000 35%);
+  border-radius: 50%;
+  background: var(--c);
+  opacity: 0.6;
 }
 .piece.selected { z-index: 2; outline: 3px solid var(--ink); outline-offset: 2px; }
 .piece.pending { opacity: 0.6; border-style: dashed; }
