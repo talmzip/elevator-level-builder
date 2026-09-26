@@ -7,7 +7,7 @@ const genSheet = document.getElementById('gen-sheet');
 const TYPE_LABELS = { rigid: 'Rigid', accordion: 'Accordion', twin: 'Twins', turner: 'Turner' };
 
 let builtLevels = null; // signature of the list on screen
-let reorder = null; // { row, pointerId, from } while a row is dragged
+let isReordering = false; // a row is being dragged: hold rebuilds
 let builtGen = null; // signature of the generator inputs on screen
 
 function el(tag, className, text = '') {
@@ -30,66 +30,161 @@ function header(title, close) {
   return row;
 }
 
-// view: { levels, current, movesText(level), open(index), move(from, to), close } or null to hide.
+// view: { levels, current, mode, selected, importCount, message, movesText(level), open(index), move(from, to),
+// toggle(id), setAll(isOn), select(), cancel(), exportSelected(), deleteSelected(), exportAll(), import(),
+// place(afterIndex), close } or null to hide. Modes: 'browse' (open, drag to reorder), 'select' (tick levels to
+// export or delete), 'place' (tap the level the import goes after).
 export function renderLevelsSheet(view) {
   levelsSheet.hidden = !view;
   if (!view) {
     builtLevels = null;
     return;
   }
-  const signature = JSON.stringify([view.current, view.levels.map(level => [level.id, level.name])]);
-  if (signature !== builtLevels && !reorder) {
+  const signature = JSON.stringify([view.mode, view.current, view.levels.map(level => [level.id, level.name])]);
+  if (signature !== builtLevels && !isReordering) {
+    const isFirst = builtLevels === null;
     builtLevels = signature;
-    const list = el('ol', 'level-list');
-    view.levels.forEach((level, index) => {
-      const row = el('li', 'level-row');
-      row.classList.toggle('current', index === view.current);
-      row.dataset.index = index;
-      const grip = el('span', 'grip', '≡');
-      grip.setAttribute('aria-label', 'Drag to reorder');
-      row.append(el('span', 'num', String(index + 1)), el('span', 'name', level.name), el('span', 'moves'), grip);
-      row.addEventListener('click', event => !event.target.closest('.grip') && view.open(index));
-      grip.addEventListener('pointerdown', event => startReorder(event, row, list, view.move));
-      list.append(row);
-    });
-    levelsSheet.replaceChildren(header('Levels', view.close), list);
-    levelsSheet.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+    levelsSheet.replaceChildren(levelsHeader(view), levelsList(view), el('p', 'sheet-note'), levelsFooter(view));
+    if (isFirst) levelsSheet.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
   }
-  levelsSheet.querySelectorAll('.level-row').forEach(row => {
+  // In place, so a streaming update never rebuilds a button under the finger.
+  const count = view.selected.size;
+  levelsSheet.querySelectorAll('.level-row[data-id]').forEach(row => {
     const level = view.levels[row.dataset.index];
-    if (level) row.querySelector('.moves').textContent = view.movesText(level);
+    row.querySelector('.moves').textContent = level ? view.movesText(level) : '';
+    row.classList.toggle('selected', view.selected.has(row.dataset.id));
   });
+  const set = (selector, text, isDisabled) => {
+    const node = levelsSheet.querySelector(selector);
+    if (!node) return;
+    node.textContent = text;
+    if (isDisabled !== undefined) node.disabled = isDisabled;
+  };
+  set('.select-count', `${count} selected`);
+  set('.select-all', count === view.levels.length ? 'None' : 'All');
+  set('.export-selected', `Export (${count})`, !count);
+  set('.delete-selected', `Delete (${count})`, !count);
+  set('.sheet-note', view.message ?? '');
 }
 
-// The dragged row follows the pointer through the list; the order is committed on release. Listens on the window:
-// moving the row in the DOM drops pointer capture.
+function levelsHeader(view) {
+  const row = el('div', 'sheet-header');
+  if (view.mode === 'select') {
+    const tools = el('div', 'header-tools');
+    tools.append(button('All', () => view.setAll(view.selected.size !== view.levels.length), 'select-all'), button('Cancel', view.cancel));
+    row.append(el('h2', 'select-count'), tools);
+  } else if (view.mode === 'place') {
+    row.append(el('h2', '', `Insert ${view.importCount} level${view.importCount === 1 ? '' : 's'} after…`), button('Cancel', view.cancel));
+  } else {
+    const tools = el('div', 'header-tools');
+    tools.append(button('Select', view.select), button('Done', view.close, 'primary'));
+    row.append(el('h2', '', 'Levels'), tools);
+  }
+  return row;
+}
+
+function levelsList(view) {
+  const list = el('ol', `level-list ${view.mode}`);
+  if (view.mode === 'place') {
+    const start = el('li', 'level-row place-start', 'At the start');
+    start.addEventListener('click', () => view.place(-1));
+    list.append(start);
+  }
+  view.levels.forEach((level, index) => {
+    const row = el('li', 'level-row');
+    row.classList.toggle('current', index === view.current);
+    Object.assign(row.dataset, { index, id: level.id });
+    const trailing = view.mode === 'browse' ? el('span', 'grip', '≡') : el('span', 'mark');
+    if (view.mode === 'browse') trailing.setAttribute('aria-label', 'Drag to reorder');
+    row.append(el('span', 'num', String(index + 1)), el('span', 'name', level.name), el('span', 'moves'), trailing);
+    row.addEventListener('click', event => {
+      if (event.target.closest('.grip')) return;
+      if (view.mode === 'select') view.toggle(level.id);
+      else if (view.mode === 'place') view.place(index);
+      else view.open(index);
+    });
+    if (view.mode === 'browse') trailing.addEventListener('pointerdown', event => startReorder(event, row, list, view.move));
+    list.append(row);
+  });
+  return list;
+}
+
+function levelsFooter(view) {
+  const row = el('div', 'popup-actions');
+  if (view.mode === 'select') {
+    row.append(button('', view.exportSelected, 'export-selected'), button('', view.deleteSelected, 'danger delete-selected'));
+  } else if (view.mode === 'browse') {
+    row.append(button('Import', view.import), button('Export all', view.exportAll));
+  }
+  return row;
+}
+
+const AUTOSCROLL_EDGE = 48; // px inside the list's visible area (between pinned header and footer) where a drag scrolls
+const AUTOSCROLL_STEP = 8; // px per frame
+
+// Live reorder: the dragged row follows the finger, the rows it passes slide out of the way and every number shows
+// its position-to-be. Near the sheet's edges the list scrolls. The order is committed on release.
 function startReorder(event, row, list, move) {
   event.preventDefault();
-  reorder = { row, pointerId: event.pointerId, from: Number(row.dataset.index) };
+  const rows = [...list.children];
+  const from = rows.indexOf(row);
+  const pitch = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : row.offsetHeight;
+  const startY = event.clientY;
+  const startScroll = levelsSheet.scrollTop;
+  let lastY = startY;
+  let to = from;
+  let frame = 0;
+  isReordering = true;
   row.classList.add('dragging');
-  const onMove = moveEvent => {
-    if (moveEvent.pointerId !== reorder.pointerId) return;
-    const others = [...list.children].filter(other => other !== row);
-    const before = others.find(other => {
-      const box = other.getBoundingClientRect();
-      return moveEvent.clientY < box.top + box.height / 2;
+  list.classList.add('reordering');
+
+  const layout = () => {
+    const dy = lastY - startY + levelsSheet.scrollTop - startScroll;
+    to = Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / pitch)));
+    rows.forEach((other, index) => {
+      let position = index;
+      if (other === row) {
+        other.style.transform = `translateY(${dy}px)`;
+        position = to;
+      } else {
+        const shift = from < to && index > from && index <= to ? -1 : from > to && index >= to && index < from ? 1 : 0;
+        other.style.transform = shift ? `translateY(${shift * pitch}px)` : '';
+        position = index + shift;
+      }
+      other.querySelector('.num').textContent = String(position + 1);
     });
-    list.insertBefore(row, before ?? null);
+  };
+  const autoscroll = () => {
+    const top = levelsSheet.querySelector('.sheet-header').getBoundingClientRect().bottom;
+    const footer = levelsSheet.querySelector(':scope > .popup-actions');
+    const bottom = footer?.offsetHeight ? footer.getBoundingClientRect().top : levelsSheet.getBoundingClientRect().bottom;
+    const step = lastY < top + AUTOSCROLL_EDGE ? -AUTOSCROLL_STEP : lastY > bottom - AUTOSCROLL_EDGE ? AUTOSCROLL_STEP : 0;
+    if (step) {
+      levelsSheet.scrollTop += step;
+      layout();
+    }
+    frame = requestAnimationFrame(autoscroll);
+  };
+  const onMove = moveEvent => {
+    if (moveEvent.pointerId !== event.pointerId) return;
+    lastY = moveEvent.clientY;
+    layout();
   };
   const onEnd = endEvent => {
-    if (endEvent.pointerId !== reorder.pointerId) return;
+    if (endEvent.pointerId !== event.pointerId) return;
+    cancelAnimationFrame(frame);
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onEnd);
     window.removeEventListener('pointercancel', onEnd);
-    const { from } = reorder;
-    const to = [...list.children].indexOf(row);
-    reorder = null;
-    builtLevels = null; // rebuild with the new numbering
-    move(from, to);
+    rows.forEach(other => { other.style.transform = ''; });
+    isReordering = false;
+    builtLevels = null; // rebuild with the new order
+    move(from, endEvent.type === 'pointercancel' ? from : to);
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onEnd);
   window.addEventListener('pointercancel', onEnd);
+  frame = requestAnimationFrame(autoscroll);
 }
 
 function stepper(label, value, min, max, set) {

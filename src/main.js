@@ -30,7 +30,7 @@ const state = {
   isGridOpen: false,
   isResizeBlocked: false, // the last live resize step had no room, so the release snaps back
   isNewOpen: false, // the New menu: empty level or generate
-  isListOpen: false, // the levels sheet
+  list: null, // the levels sheet: { mode: 'browse' | 'select' | 'place', selected: Set of ids, importing, message }
   gen: null, // the generator sheet: { request, pool, workers, tried, hardest, isRunning, lastFound, pending }
 };
 let flashTimer = null;
@@ -211,20 +211,60 @@ function showLevel(index) {
   render();
 }
 
-function exportLevels() {
-  const url = URL.createObjectURL(new Blob([store.exportJson()], { type: 'application/json' }));
-  Object.assign(document.createElement('a'), { href: url, download: 'elevator-levels.json' }).click();
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+function download(json, filename) {
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: filename }).click();
   setTimeout(() => URL.revokeObjectURL(url));
 }
 
+// 1-based list positions for a file name: "4-13" for a run, "3,5,9" for scattered picks, "1-3,7" mixed.
+function positionsLabel(indices) {
+  const runs = [];
+  for (const index of [...indices].sort((a, b) => a - b)) {
+    const run = runs.at(-1);
+    if (run && index === run[1] + 1) run[1] = index;
+    else runs.push([index, index]);
+  }
+  return runs.map(([first, last]) => (first === last ? `${first + 1}` : `${first + 1}-${last + 1}`)).join(',');
+}
+
+const selectedIndices = () => store.levels.flatMap((level, index) => (state.list.selected.has(level.id) ? [index] : []));
+
+const setList = changes => {
+  state.list = { mode: 'browse', selected: new Set(), importing: [], message: '', ...changes };
+  render();
+};
+
+function exportSelected() {
+  const indices = selectedIndices();
+  download(store.exportJson(indices), `levels-${positionsLabel(indices)}.json`);
+  setList({ message: `Exported ${plural(indices.length, 'level')}.` });
+}
+
+function deleteSelected() {
+  const indices = selectedIndices();
+  if (!confirm(`Delete ${plural(indices.length, 'level')}?`)) return;
+  const open = store.removeMany(indices);
+  state.list = { mode: 'browse', selected: new Set(), importing: [], message: `Deleted ${plural(indices.length, 'level')}.` };
+  showLevel(open);
+}
+
+// A valid file switches the list to placing its levels; they go in, in file order, after the tapped level.
 async function importLevels(file) {
   try {
-    const count = store.importJson(await file.text());
-    render();
-    flash(`Imported ${count} level${count === 1 ? '' : 's'}.`);
+    setList({ mode: 'place', importing: store.parseImport(await file.text()) });
   } catch {
-    flash('Not a valid level file.');
+    setList({ message: 'Not a valid level file.' });
   }
+}
+
+function placeImport(afterIndex) {
+  const { importing } = state.list;
+  const first = store.insertAllAfter(afterIndex, importing);
+  state.list = { mode: 'browse', selected: new Set(), importing: [], message: `Imported ${plural(importing.length, 'level')}.` };
+  showLevel(first);
 }
 
 // Largest cell that fits the board (plus exit strip) beside or above the tools, and above an open sheet that
@@ -264,7 +304,7 @@ function render() {
   for (const button of ui.actions.querySelectorAll('button')) button.disabled = isPlay;
   ui.solved.hidden = !(isPlay && isSolved(current));
   const edited = store.levels[store.current];
-  wantMoves([edited, ...(state.isListOpen ? store.levels : [])]);
+  wantMoves([edited, ...(state.list ? store.levels : [])]);
   renderMoves();
   renderMenuPopup(state.isNewOpen ? { anchor: ui.newButton, items: [['Empty level', addEmpty], ['Generate…', openGenerator]] } : null);
   renderSheets();
@@ -298,23 +338,46 @@ function renderMoves() {
 }
 
 function renderSheets() {
-  renderLevelsSheet(state.isListOpen ? {
+  const list = state.list;
+  renderLevelsSheet(list && {
     levels: store.levels,
     current: store.current,
+    mode: list.mode,
+    selected: list.selected,
+    importCount: list.importing.length,
+    message: list.message,
     movesText: level => movesText(movesOf(level)),
     open: index => {
-      state.isListOpen = false;
+      state.list = null;
       showLevel(index);
     },
     move: (from, to) => {
       store.move(from, to);
       render();
     },
+    toggle: id => {
+      if (!list.selected.delete(id)) list.selected.add(id);
+      renderSheets();
+    },
+    setAll: isOn => {
+      list.selected = new Set(isOn ? store.levels.map(level => level.id) : []);
+      renderSheets();
+    },
+    select: () => setList({ mode: 'select' }),
+    cancel: () => setList({}),
+    exportSelected,
+    deleteSelected,
+    exportAll: () => {
+      download(store.exportJson(), 'elevator-levels.json');
+      setList({ message: `Exported all ${plural(store.levels.length, 'level')}.` });
+    },
+    import: () => ui.importFile.click(),
+    place: placeImport,
     close: () => {
-      state.isListOpen = false;
+      state.list = null;
       render();
     },
-  } : null);
+  });
   const gen = state.gen;
   renderGeneratorSheet(gen && {
     request: gen.request,
@@ -482,7 +545,8 @@ ui.reset.addEventListener('click', () => {
 ui.prev.addEventListener('click', () => showLevel(store.current - 1));
 ui.next.addEventListener('click', () => showLevel(store.current + 1));
 ui.position.addEventListener('click', () => {
-  state.isListOpen = !state.isListOpen;
+  if (!state.list) return setList({});
+  state.list = null;
   render();
 });
 ui.newButton.addEventListener('click', () => {
@@ -493,8 +557,6 @@ $('duplicate-btn').addEventListener('click', () => showLevel(store.duplicate(sto
 $('delete-btn').addEventListener('click', () => {
   if (confirm(`Delete "${level().name}"?`)) showLevel(store.remove(store.current));
 });
-$('export-btn').addEventListener('click', exportLevels);
-$('import-btn').addEventListener('click', () => ui.importFile.click());
 ui.importFile.addEventListener('change', () => {
   const [file] = ui.importFile.files;
   ui.importFile.value = '';

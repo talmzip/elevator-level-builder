@@ -236,7 +236,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .nav button { width: 44px; padding: 0; font-size: 22px; }
 /* "Level 3 of 8" opens the level list */
 .nav .position { width: auto; padding: 0 14px; font-size: 15px; border-style: dashed; }
-.actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .actions button { padding: 0 2px; font-size: 13px; }
 
 /* Popups */
@@ -290,6 +290,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .sheet .stepper { grid-template-columns: 1fr 44px 32px 44px; }
 .level-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .level-row {
+  position: relative;
   min-height: 44px;
   padding: 0 0 0 10px;
   display: grid;
@@ -302,7 +303,25 @@ button:disabled { opacity: 0.4; cursor: default; }
   cursor: pointer;
 }
 .level-row.current { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.level-row.dragging { opacity: 0.7; background: var(--bg); }
+/* Live reorder: passed rows slide aside, the dragged one rides the finger above them */
+.level-list.reordering .level-row { transition: transform 0.15s ease; }
+.level-list.reordering .level-row.dragging { z-index: 1; transition: none; background: var(--bg); box-shadow: 0 6px 18px rgb(0 0 0 / 0.18); }
+/* Select: a tick circle per row */
+.mark { width: 22px; height: 22px; justify-self: center; border: 2px solid var(--line); border-radius: 50%; }
+.level-row.selected { background: color-mix(in srgb, var(--ink) 6%, var(--surface)); }
+.level-row.selected .mark { border-color: var(--ink); background: var(--ink); box-shadow: inset 0 0 0 3px var(--surface); }
+/* Place: every row is a drop point for the import */
+.level-list.place .level-row { border-style: dashed; }
+.level-list.place .level-row .mark { display: none; }
+.level-row.place-start { display: flex; padding: 0 12px; color: var(--muted); }
+.header-tools { display: flex; gap: 6px; }
+.sheet-note { margin: 0; color: var(--muted); font-size: 13px; }
+/* The level list scrolls under a pinned header and footer */
+#levels-sheet > .sheet-header, #levels-sheet > .popup-actions { position: sticky; z-index: 2; background: var(--surface); }
+#levels-sheet > .sheet-header { top: -12px; margin-top: -12px; padding-top: 12px; }
+#levels-sheet > .popup-actions { bottom: calc(-12px - env(safe-area-inset-bottom)); margin-bottom: calc(-12px - env(safe-area-inset-bottom)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+#levels-sheet > .popup-actions:empty { display: none; }
+.sheet-note:empty { display: none; }
 .level-row .num { color: var(--muted); font-variant-numeric: tabular-nums; }
 .level-row .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .level-row .moves { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
