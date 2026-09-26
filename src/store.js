@@ -1,5 +1,5 @@
 // All levels in localStorage under one key, in the export shape plus the open level: { version, levels, current }.
-import { isValidLevel, newId, newLevel, upgradeLevel, withKidCentred } from './model.js';
+import { isValidLevel, newId, newLevel, upgradeLevel, withAccordionsInLimits, withKidCentred } from './model.js';
 
 const KEY = 'elevator-level-builder';
 const VERSION = 2; // 2: accordions with head, fold side and state (version 1 files are upgraded on load and import)
@@ -25,7 +25,7 @@ function load() {
     const data = JSON.parse(localStorage.getItem(KEY));
     const file = upgraded(data);
     loadNote = file?.note ?? '';
-    const stored = file ? file.levels.filter(isValidLevel).map(withKidCentred) : [];
+    const stored = file ? file.levels.filter(isValidLevel).map(withKidCentred).map(withAccordionsInLimits) : [];
     if (stored.length) {
       current = Number.isInteger(data.current) && stored[data.current] ? data.current : 0;
       return stored;
@@ -100,5 +100,5 @@ export function insertAllAfter(index, newLevels) {
 export function parseImport(text) {
   const file = upgraded(JSON.parse(text));
   if (!file || !file.levels.length || !file.levels.every(isValidLevel)) throw new Error('invalid level file');
-  return { levels: file.levels.map(level => ({ ...withKidCentred(level), id: newId() })), note: file.note };
+  return { levels: file.levels.map(level => ({ ...withAccordionsInLimits(withKidCentred(level)), id: newId() })), note: file.note };
 }

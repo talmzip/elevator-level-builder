@@ -1,5 +1,5 @@
 // Floating panels: grid size, and the selected piece's controls (Edit and Play variants).
-import { FOLD_SIDES, HEAD_DIRS, accordionWith, foldSideFor, lineAxis, maxSide, maxTurnerLength, resize, twinTransfer } from './rules.js';
+import { FOLD_SIDES, HEAD_DIRS, accordionEdited, lineAxis, maxSide, maxTurnerLength, resize, twinTransfer } from './rules.js';
 
 const piecePopup = document.getElementById('piece-popup');
 const gridPopup = document.getElementById('grid-popup');
@@ -71,11 +71,14 @@ function controlsFor({ level, piece, mode, apply, resizeLive, resizeEnd, remove 
   const live = (label, min, max, step, value, sized) =>
     slider(label, min, max, step, value, String, resizeEnd, next => resizeLive(piece, sized(next)));
   const remover = actionRow(button('Delete', () => remove(piece), 'danger'));
-  // Accordion changes keep the tail in place; no room shakes.
-  const change = changes => apply([accordionWith(piece, changes)]);
+  // Accordion changes land where they fit (rules.accordionEdited); nowhere shakes.
+  const change = changes => {
+    const next = accordionEdited(level, piece, changes);
+    apply(next && [next]);
+  };
   switch (piece.type) {
     case 'accordion': return [
-      choiceRow('Head', HEAD_DIRS, piece.dir, dir => change({ dir, side: foldSideFor(dir, piece.side) })),
+      choiceRow('Head', HEAD_DIRS, piece.dir, dir => change({ dir })),
       choiceRow('Fold side', FOLD_SIDES[lineAxis(piece.dir)], piece.side, side => change({ side })),
       choiceRow('Starts', [false, true], piece.folded, folded => change({ folded })),
       remover,

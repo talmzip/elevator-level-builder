@@ -78,6 +78,7 @@ function pieceEl(piece) {
     height: `${h * cell - 2 * INSET}px`,
   });
   if (piece.type === 'accordion') el.append(...accordionMarks(piece));
+  if (piece.type !== 'kid') el.append(faceEl(piece));
   if (piece.type === 'turner') {
     const pivot = document.createElement('i');
     pivot.className = 'pivot';
@@ -90,29 +91,60 @@ function pieceEl(piece) {
   return el;
 }
 
-// An accordion's face on its head cell and, exposed, a bar along the fold-side edge of the half that flips over.
+const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
+
+// Where a creature looks and the strip of cells its eyes sit on (design § 1 → Faces): the accordion's head (reversed
+// while folded — the head half has flipped over), the twins' head end (their start, which stays put), rigid and turner
+// the right / bottom end by convention. The kid has its own face.
+function facing(piece) {
+  const { row, col, w, h } = rectOf(piece);
+  if (piece.type === 'accordion') {
+    const [r, c] = accordionCells(accordionTail(piece), piece.dir, piece.side, piece.folded)[3];
+    return { dir: piece.folded ? OPPOSITE[piece.dir] : piece.dir, strip: { row: r, col: c, w: 1, h: 1 } };
+  }
+  if (piece.type === 'twin') return { dir: axisOf(piece) === 'h' ? 'left' : 'up', strip: { row, col, w: 1, h: 1 } };
+  return axisOf(piece) === 'h'
+    ? { dir: 'right', strip: { row, col: col + w - 1, w: 1, h } }
+    : { dir: 'down', strip: { row: row + h - 1, col, w, h: 1 } };
+}
+
+// An absolutely placed mark inside a piece element, given board cells.
+function markAt(piece, className, left, top, width, height) {
+  const node = document.createElement('i');
+  node.className = className;
+  Object.assign(node.style, {
+    left: `${left - piece.col * cell - INSET}px`, top: `${top - piece.row * cell - INSET}px`, width: `${width}px`, height: `${height}px`,
+  });
+  return node;
+}
+
+function faceEl(piece) {
+  const { dir, strip } = facing(piece);
+  return markAt(piece, `face ${dir}`, strip.col * cell, strip.row * cell, strip.w * cell, strip.h * cell);
+}
+
+// Exposed: a bar on the fold side of the half that flips over. Folded: the crease between the tail pair and the
+// flipped pair.
 function accordionMarks(piece) {
-  const cells = accordionCells(accordionTail(piece), piece.dir, piece.side, piece.folded);
-  const offset = ([r, c]) => [(c - piece.col) * cell - INSET, (r - piece.row) * cell - INSET]; // cell corner in the piece
-  const mark = (className, left, top, width, height) => {
-    const node = document.createElement('i');
-    node.className = className;
-    Object.assign(node.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
-    return node;
-  };
-  const [headLeft, headTop] = offset(cells[3]);
-  const face = mark('face', headLeft, headTop, cell, cell);
-  if (piece.folded) return [face];
-  const [bLeft, bTop] = offset(cells[2]);
-  const [left, top] = [Math.min(bLeft, headLeft), Math.min(bTop, headTop)];
+  const [tail, a, b, head] = accordionCells(accordionTail(piece), piece.dir, piece.side, piece.folded);
+  const isRowSide = piece.side === 'up' || piece.side === 'down';
   const [span, thick] = [2 * cell - 16, 4];
+  if (piece.folded) {
+    const top = Math.max(tail[0], head[0]) * cell;
+    const left = Math.max(tail[1], head[1]) * cell;
+    const [r0, c0] = [Math.min(tail[0], a[0]), Math.min(tail[1], a[1])];
+    return [isRowSide
+      ? markAt(piece, 'crease', c0 * cell + 8, top - thick / 2, span, thick)
+      : markAt(piece, 'crease', left - thick / 2, r0 * cell + 8, thick, span)];
+  }
+  const [r0, c0] = [Math.min(b[0], head[0]), Math.min(b[1], head[1])];
   const bar = {
-    up: [left + 8, top + 2, span, thick],
-    down: [left + 8, top + cell - 2 - thick, span, thick],
-    left: [left + 2, top + 8, thick, span],
-    right: [left + cell - 2 - thick, top + 8, thick, span],
+    up: [c0 * cell + 8, r0 * cell + INSET + 2, span, thick],
+    down: [c0 * cell + 8, (r0 + 1) * cell - INSET - 2 - thick, span, thick],
+    left: [c0 * cell + INSET + 2, r0 * cell + 8, thick, span],
+    right: [(c0 + 1) * cell - INSET - 2 - thick, r0 * cell + 8, thick, span],
   }[piece.side];
-  return [face, mark('fold-mark', ...bar)];
+  return [markAt(piece, 'fold-mark', ...bar)];
 }
 
 // A small tappable mark in the piece's colour, centred on a top-left cell the piece could take.
@@ -190,7 +222,7 @@ function onBoardDown(event) {
   const edge = event.target.closest('.handle')?.dataset.edge;
   const isDot = Boolean(event.target.closest('.dot'));
   const [row, col] = cellAt(event);
-  // A dot can sit on the selected piece in Play: tapping it is a dot tap, dragging it still drags the piece.
+  // Dots (Edit placement) sit on free cells, so a dot tap is an empty-cell tap.
   const id = edge ? view.selectedId : isDot ? pieceAt(row, col) : event.target.closest('.piece')?.dataset.id ?? null;
   const isAccordion = getPiece(view.level, id)?.type === 'accordion';
   const canRotate = view.mode === 'edit' && !edge && !isDot && id && id !== 'kid' && id !== view.pendingId && !isAccordion;

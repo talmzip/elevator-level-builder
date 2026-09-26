@@ -50,6 +50,18 @@ export function accordionWith(piece, changes) {
   return { ...next, row: Math.min(...cells.map(([r]) => r)), col: Math.min(...cells.map(([, c]) => c)) };
 }
 
+// An Edit change to an accordion (head, fold side, state). Folded, head and side rearrange inside the same 2×2; exposed,
+// reversing the head or changing the side keeps the same cells; otherwise the tail stays put when that fits, else the
+// nearest spot that fits. Null when nothing fits. Only Play folding needs a fixed tail; editing just needs to land.
+export function accordionEdited(level, piece, changes) {
+  const next = { ...piece, ...changes };
+  next.side = foldSideFor(next.dir, next.side);
+  const isSameCells = next.folded === piece.folded && (piece.folded || lineAxis(next.dir) === lineAxis(piece.dir));
+  if (isSameCells) return next;
+  const anchored = accordionWith(piece, next);
+  return fits(level, anchored) ? anchored : nearestFit(level, anchored);
+}
+
 // Footprint rectangle; a piece's position is its top-left cell.
 export function rectOf(piece) {
   const { row, col } = piece;

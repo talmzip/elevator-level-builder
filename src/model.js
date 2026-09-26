@@ -1,5 +1,5 @@
 // Level shape (design § 6): factories, palette defaults, ids, immutable edits, validation.
-import { FOLD_SIDES, HEAD_DIRS, allPieces, exitCol, fits, kidPiece, lineAxis, nearestFit } from './rules.js';
+import { FOLD_SIDES, HEAD_DIRS, accordionWith, allPieces, exitCol, fits, kidPiece, lineAxis, maxSide, nearestFit } from './rules.js';
 
 export const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -37,6 +37,17 @@ export function withKidCentred(level) {
   const rows = [...Array(level.rows).keys()].sort((a, b) => Math.abs(a - level.kid.row) - Math.abs(b - level.kid.row));
   const row = rows.find(r => fits(level, { ...kidPiece(level), row: r, col }));
   return row === undefined ? level : { ...level, kid: { row, col } };
+}
+
+// Exposed accordions longer than the grid allows (a line spans at most grid − 1) folded, where the fold fits.
+export function withAccordionsInLimits(level) {
+  let next = level;
+  for (const piece of level.pieces) {
+    if (piece.type !== 'accordion' || piece.folded || maxSide(level, lineAxis(piece.dir)) >= 4) continue;
+    const folded = accordionWith(piece, { folded: true });
+    if (fits(next, folded)) next = withPiece(next, folded);
+  }
+  return next;
 }
 
 // Copy of the level with these pieces replaced by id, or appended when new.
@@ -103,7 +114,8 @@ export function upgradeLevel(level) {
   for (const old of level.pieces.filter(isOld)) {
     const dir = old.axis === 'v' ? 'down' : 'right';
     const base = { id: old.id, type: 'accordion', row: old.row, col: old.col, dir, side: dir === 'right' ? 'down' : 'right' };
-    const states = old.w === 2 && old.h === 2 ? [true, false] : [false, true];
+    const isTooLong = maxSide(level, lineAxis(dir)) < 4; // an exposed line may span at most grid − 1
+    const states = isTooLong ? [true] : old.w === 2 && old.h === 2 ? [true, false] : [false, true];
     const candidates = states.map(folded => ({ ...base, folded }));
     const piece = candidates.find(candidate => fits(next, candidate))
       ?? candidates.map(candidate => nearestFit(next, candidate)).find(Boolean);

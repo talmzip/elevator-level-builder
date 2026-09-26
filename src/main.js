@@ -1,5 +1,5 @@
 // Boot and wiring: app state, Edit / Play modes, palette, level navigation and file actions.
-import { abilityStep, fitResized, fitSpots, fits, isSolved, laneClear, moveTo, regrid, rotated, slideSpots } from './rules.js';
+import { abilityStep, fitResized, fitSpots, fits, isSolved, laneClear, moveTo, regrid, rotated } from './rules.js';
 import { createPiece, getPiece, newLevel, nextPieceId, withPiece, withoutPiece } from './model.js';
 import * as store from './store.js';
 import { initBoard, pieceElement, renderBoard, shake } from './board.js';
@@ -119,14 +119,11 @@ function renderHint() {
     : 'Drag a creature onto the board, or tap it then a cell.';
 }
 
-// Hint dots (design § 3, § 4): in Edit, every cell where the armed or partner piece fits; in Play, every spot the
-// selected piece can slide to. Derived from state, so they clear with the selection, the palette and the mode.
+// Hint dots (design § 3): in Edit, every cell where the armed or partner piece fits. Play has none — pieces slide by
+// drag. Derived from state, so they clear with the palette and the mode.
 function hintDots() {
   const current = level();
-  if (state.play) {
-    const piece = state.selectedId && getPiece(current, state.selectedId);
-    return piece ? { type: piece.type, spots: slideSpots(current, piece) } : null;
-  }
+  if (state.play) return null;
   if (state.pendingTwin) return { type: 'twin', spots: fitSpots(withPiece(current, state.pendingTwin), createPiece('twin', 'new', 0, 0)) };
   return state.armed ? { type: state.armed, spots: fitSpots(current, createPiece(state.armed, 'new', 0, 0)) } : null;
 }
@@ -137,7 +134,6 @@ const isDotted = (row, col) => Boolean(hintDots()?.spots.some(([r, c]) => r === 
 function onBoardTap(id, row, col) {
   const current = level();
   if (state.play) {
-    if (!id && isDotted(row, col)) return onBoardMove(state.selectedId, row, col); // slide there: one Undo step
     state.selectedId = id;
     const piece = id && getPiece(current, id);
     // Accordion, turner and twin cycle their ability on tap; kid and rigid have none.

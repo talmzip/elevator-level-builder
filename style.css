@@ -145,21 +145,28 @@ button:disabled { opacity: 0.4; cursor: default; }
   background-size: var(--cell) var(--cell);
   background-position: -5px -5px;
 }
-/* Folded: the bellows squashed, ribs twice as dense */
-.piece.accordion.folded { background-size: calc(var(--cell) / 2) calc(var(--cell) / 2); }
-/* Accordion head: two dot eyes; the fold-side bar marks where the head half flips to */
+/* Folded: no ribs, just the crease between the tail pair and the flipped pair */
+.piece.accordion.folded { background-image: none; }
+.crease { position: absolute; pointer-events: none; border-radius: 2px; background: color-mix(in srgb, var(--c), #000 40%); }
+/* Eyes at a creature's front, set toward the way it faces */
 .face { position: absolute; pointer-events: none; }
 .face::before, .face::after {
   content: "";
   position: absolute;
-  top: 42%;
   width: max(4px, calc(var(--cell) * 0.1));
   aspect-ratio: 1;
+  translate: -50% -50%;
   border-radius: 50%;
   background: var(--ink);
 }
-.face::before { left: 34%; }
-.face::after { right: 34%; }
+.face.left::before, .face.left::after { left: 26%; }
+.face.right::before, .face.right::after { left: 74%; }
+.face.left::before, .face.right::before { top: calc(50% - var(--cell) * 0.12); }
+.face.left::after, .face.right::after { top: calc(50% + var(--cell) * 0.12); }
+.face.up::before, .face.up::after { top: 26%; }
+.face.down::before, .face.down::after { top: 74%; }
+.face.up::before, .face.down::before { left: calc(50% - var(--cell) * 0.12); }
+.face.up::after, .face.down::after { left: calc(50% + var(--cell) * 0.12); }
 .fold-mark { position: absolute; pointer-events: none; border-radius: 2px; background: color-mix(in srgb, var(--c), #000 45%); }
 .piece.kid::before {
   content: "";
