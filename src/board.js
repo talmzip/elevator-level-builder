@@ -123,19 +123,15 @@ function faceEl(piece) {
   return markAt(piece, `face ${dir}`, strip.col * cell, strip.row * cell, strip.w * cell, strip.h * cell);
 }
 
-// Exposed: a bar on the fold side of the half that flips over. Folded: the crease between the tail pair and the
-// flipped pair.
+// Exposed: a bar on the fold side of the half that flips over. Folded: the crease between the tail and the head only.
 function accordionMarks(piece) {
-  const [tail, a, b, head] = accordionCells(accordionTail(piece), piece.dir, piece.side, piece.folded);
-  const isRowSide = piece.side === 'up' || piece.side === 'down';
+  const [tail, , b, head] = accordionCells(accordionTail(piece), piece.dir, piece.side, piece.folded);
   const [span, thick] = [2 * cell - 16, 4];
   if (piece.folded) {
-    const top = Math.max(tail[0], head[0]) * cell;
-    const left = Math.max(tail[1], head[1]) * cell;
-    const [r0, c0] = [Math.min(tail[0], a[0]), Math.min(tail[1], a[1])];
-    return [isRowSide
-      ? markAt(piece, 'crease', c0 * cell + 8, top - thick / 2, span, thick)
-      : markAt(piece, 'crease', left - thick / 2, r0 * cell + 8, thick, span)];
+    const crease = cell - 12;
+    return [piece.side === 'up' || piece.side === 'down'
+      ? markAt(piece, 'crease', tail[1] * cell + 6, Math.max(tail[0], head[0]) * cell - thick / 2, crease, thick)
+      : markAt(piece, 'crease', Math.max(tail[1], head[1]) * cell - thick / 2, tail[0] * cell + 6, thick, crease)];
   }
   const [r0, c0] = [Math.min(b[0], head[0]), Math.min(b[1], head[1])];
   const bar = {
