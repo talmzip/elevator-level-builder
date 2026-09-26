@@ -2,7 +2,7 @@
 // (winning move excluded) and the creature types that must take part. Random layouts of those types are explored
 // in full; any arrangement exactly `moves` from the exit whose every fewest-move solution moves each type is a
 // level. Too easy or too open adds a creature, stuck removes one. Pure, no DOM.
-import { accordionStates, axisOf, exitCol, fitSpots, maxSide, maxTurnerLength, moveTo, rectOf, resize } from './rules.js';
+import { FOLD_SIDES, HEAD_DIRS, accordionTail, axisOf, exitCol, fitSpots, lineAxis, maxSide, maxTurnerLength, moveTo, rectOf, resize } from './rules.js';
 import { newId } from './model.js';
 import { explore, isTypeNeeded } from './solver.js';
 
@@ -12,7 +12,7 @@ const LAYOUT_STATES = 15000; // one layout's search budget; past it the layout i
 const SEARCH_MS = 15000; // one search run, then it reports what it found
 const LEVELS_PER_RUN = 5; // ready levels to collect before a run stops early
 const CANDIDATES_CHECKED = 40; // arrangements at the right distance tried against the every-type rule per layout
-const MIN_CELLS = { rigid: 2, accordion: 2, twin: 2, turner: 3 }; // smallest footprint (twins: the pair)
+const MIN_CELLS = { rigid: 2, accordion: 4, twin: 2, turner: 3 }; // smallest footprint (twins: the pair)
 
 const random = n => Math.floor(Math.random() * n);
 const pick = list => list[random(list.length)];
@@ -23,6 +23,7 @@ export function checkRequest({ rows, cols, types }) {
   const problems = [];
   if (!types.length) problems.push('Pick at least one creature.');
   if (types.includes('turner') && Math.min(rows, cols) < 4) problems.push('A turner needs a grid of at least 4 × 4.');
+  if (types.includes('accordion') && Math.max(rows, cols) < 5) problems.push('An accordion needs a grid at least 5 wide or tall.');
   const cells = 1 + types.reduce((sum, type) => sum + MIN_CELLS[type], 0);
   if (cells > rows * cols) problems.push(`These creatures don't fit a ${rows} × ${cols} grid.`);
   return problems;
@@ -37,10 +38,9 @@ function randomPieces(level, type, id) {
       return [axis === 'h' ? resize({ id, type, row: 0, col: 0, axis }, length, 1) : resize({ id, type, row: 0, col: 0, axis }, 1, length)];
     }
     case 'accordion': {
-      const area = 2 + random(3);
-      const states = accordionStates(level, { w: area, h: 1 });
-      const { w, h } = pick(states);
-      return [resize({ id, type, row: 0, col: 0, axis: direction() }, w, h)];
+      const dir = pick(HEAD_DIRS);
+      const isLong = maxSide(level, lineAxis(dir)) >= 4; // an exposed line needs a grid of 5 in its direction
+      return [{ id, type, row: 0, col: 0, dir, side: pick(FOLD_SIDES[lineAxis(dir)]), folded: !isLong || random(2) === 0 }];
     }
     case 'twin': {
       const partnerId = `${id}b`;
@@ -58,8 +58,10 @@ function randomPieces(level, type, id) {
   }
 }
 
-// A rigid or twin sliding vertically in the kid's column can never leave it, so it would block the exit for good.
+// A rigid, twin or accordion tail sliding vertically in the kid's column can never leave it, so it would block the exit
+// for good.
 function blocksForever(piece, kidCol) {
+  if (piece.type === 'accordion') return axisOf(piece) === 'v' && accordionTail(piece)[1] === kidCol;
   if (piece.type !== 'rigid' && piece.type !== 'twin') return false;
   const { col, w } = rectOf(moveTo(piece, 0, piece.col));
   return axisOf(piece) === 'v' && col <= kidCol && kidCol < col + w;

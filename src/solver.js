@@ -1,7 +1,7 @@
 // Play-move search. A move is one Undo step — a slide of any distance, an accordion or turner tap, or a twin
 // transfer to any length (the Play slider). Counts exclude the winning move: a level whose lane is clear is 0.
 // Pure, no DOM.
-import { accordionStates, allPieces, axisOf, cellsOf, moveTo, rectOf, resize, turnerRotated, twinTransfer } from './rules.js';
+import { accordionWith, allPieces, axisOf, cellsOf, moveTo, rectOf, turnerRotated, twinTransfer } from './rules.js';
 import { withPiece } from './model.js';
 
 const MAX_STATES = 200000; // minMoves budget; past it the answer is only a lower bound
@@ -9,6 +9,7 @@ const MAX_STATES = 200000; // minMoves budget; past it the answer is only a lowe
 const pieceKey = piece => {
   if (piece.type === 'kid') return `${piece.row},${piece.col}`;
   if (piece.type === 'twin' || piece.type === 'turner') return `${piece.row},${piece.col},${piece.length},${piece.orientation}`;
+  if (piece.type === 'accordion') return `${piece.row},${piece.col},${piece.dir},${piece.side},${piece.folded ? 1 : 0}`;
   return `${piece.row},${piece.col},${piece.w},${piece.h},${piece.axis}`;
 };
 
@@ -69,16 +70,10 @@ function fitsGrid(level, grid, pieces, owners) {
   });
 }
 
-// rules.abilityStep for an accordion, on the grid: the next shape in its cycle that fits, or null.
+// rules.abilityStep for an accordion, on the grid: folded or unfolded if its landing cells are free, or null.
 function accordionStep(level, grid, piece, owner) {
-  const states = accordionStates(level, piece);
-  const current = states.findIndex(({ w, h }) => w === piece.w && h === piece.h);
-  for (let step = 1; step < states.length; step++) {
-    const { w, h } = states[(current + step) % states.length];
-    const next = resize(piece, w, h);
-    if (fitsGrid(level, grid, [next], [owner])) return next;
-  }
-  return null;
+  const next = accordionWith(piece, { folded: !piece.folded });
+  return fitsGrid(level, grid, [next], [owner]) ? next : null;
 }
 
 // rules.turnerTurn on the grid: the turned turner if its new cells and one pair of opposite sweep quadrants are

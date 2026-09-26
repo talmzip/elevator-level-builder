@@ -1,5 +1,5 @@
 // Level shape (design § 6): factories, palette defaults, ids, immutable edits, validation.
-import { allPieces, exitCol, fits, kidPiece } from './rules.js';
+import { FOLD_SIDES, HEAD_DIRS, allPieces, exitCol, fits, kidPiece, lineAxis, nearestFit } from './rules.js';
 
 export const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -12,11 +12,11 @@ export const newLevel = (rows = 6, cols = 6) => ({
   pieces: [],
 });
 
-// Palette defaults: rigid 2×1, accordion 4×1, twin 2 (+ partner 2), turner 3.
+// Palette defaults: rigid 2×1, accordion exposed head right / fold side down, twin 2 (+ partner 2), turner 3.
 export function createPiece(type, id, row, col) {
   switch (type) {
     case 'rigid': return { id, type, row, col, w: 2, h: 1, axis: 'h' };
-    case 'accordion': return { id, type, row, col, w: 4, h: 1, axis: 'h' };
+    case 'accordion': return { id, type, row, col, dir: 'right', side: 'down', folded: false };
     case 'twin': return { id, type, row, col, length: 2, orientation: 'h', partner: null };
     case 'turner': return { id, type, row, col, length: 3, orientation: 'h' };
   }
@@ -67,9 +67,10 @@ function isValidPiece(piece, level) {
   if (!piece || typeof piece.id !== 'string' || !isInt(piece.row, 0) || !isInt(piece.col, 0)) return false;
   switch (piece.type) {
     case 'rigid':
-    case 'accordion':
       return isInt(piece.w, 1) && isInt(piece.h, 1) && isDirection(piece.axis)
         && (piece.w === piece.h || piece.axis === (piece.w > piece.h ? 'h' : 'v'));
+    case 'accordion':
+      return HEAD_DIRS.includes(piece.dir) && FOLD_SIDES[lineAxis(piece.dir)].includes(piece.side) && typeof piece.folded === 'boolean';
     case 'twin': {
       const partner = level.pieces.find(other => other?.id === piece.partner);
       return isInt(piece.length, 1) && isDirection(piece.orientation)
@@ -90,4 +91,26 @@ export function isValidLevel(level) {
   const ids = new Set(level.pieces.map(piece => piece?.id));
   if (ids.size !== level.pieces.length || ids.has('kid')) return false;
   return level.pieces.every(piece => isValidPiece(piece, level)) && fits(level, ...allPieces(level));
+}
+
+// A version 1 level (accordions as w × h of any area) in version 2 shape. A 4-long line becomes exposed with its head
+// at the right / bottom end, a 2×2 folded; any other size becomes 4 cells, exposed or folded, where it fits nearest.
+// lost counts accordions with no room anywhere, which are removed.
+export function upgradeLevel(level) {
+  const isOld = piece => piece.type === 'accordion' && 'w' in piece;
+  let next = { ...level, pieces: level.pieces.filter(piece => !isOld(piece)) };
+  const placed = new Map();
+  for (const old of level.pieces.filter(isOld)) {
+    const dir = old.axis === 'v' ? 'down' : 'right';
+    const base = { id: old.id, type: 'accordion', row: old.row, col: old.col, dir, side: dir === 'right' ? 'down' : 'right' };
+    const states = old.w === 2 && old.h === 2 ? [true, false] : [false, true];
+    const candidates = states.map(folded => ({ ...base, folded }));
+    const piece = candidates.find(candidate => fits(next, candidate))
+      ?? candidates.map(candidate => nearestFit(next, candidate)).find(Boolean);
+    if (!piece) continue;
+    placed.set(piece.id, piece);
+    next = { ...next, pieces: [...next.pieces, piece] };
+  }
+  const pieces = level.pieces.map(piece => (isOld(piece) ? placed.get(piece.id) : piece)).filter(Boolean);
+  return { level: { ...level, pieces }, lost: level.pieces.filter(isOld).length - placed.size };
 }

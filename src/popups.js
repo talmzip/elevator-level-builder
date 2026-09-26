@@ -1,5 +1,5 @@
 // Floating panels: grid size, and the selected piece's controls (Edit and Play variants).
-import { maxSide, maxTurnerLength, resize, twinTransfer } from './rules.js';
+import { FOLD_SIDES, HEAD_DIRS, accordionWith, foldSideFor, lineAxis, maxSide, maxTurnerLength, resize, twinTransfer } from './rules.js';
 
 const piecePopup = document.getElementById('piece-popup');
 const gridPopup = document.getElementById('grid-popup');
@@ -35,6 +35,22 @@ function slider(label, min, max, step, value, format, onChange, onLive) {
   return row;
 }
 
+const TEXT = { left: '←', right: '→', up: '↑', down: '↓', false: 'Exposed', true: 'Folded' };
+
+// A label and a segmented row of buttons, the current value pressed.
+function choiceRow(label, values, current, choose) {
+  const row = el('div', 'control choice');
+  const buttons = el('div', 'segments');
+  for (const value of values) {
+    const node = button(TEXT[value], () => value !== current && choose(value));
+    node.setAttribute('aria-pressed', value === current);
+    node.setAttribute('aria-label', `${label} ${value}`);
+    buttons.append(node);
+  }
+  row.append(el('span', '', label), buttons);
+  return row;
+}
+
 function actionRow(...buttons) {
   const row = el('div', 'popup-actions');
   row.append(...buttons);
@@ -55,9 +71,16 @@ function controlsFor({ level, piece, mode, apply, resizeLive, resizeEnd, remove 
   const live = (label, min, max, step, value, sized) =>
     slider(label, min, max, step, value, String, resizeEnd, next => resizeLive(piece, sized(next)));
   const remover = actionRow(button('Delete', () => remove(piece), 'danger'));
+  // Accordion changes keep the tail in place; no room shakes.
+  const change = changes => apply([accordionWith(piece, changes)]);
   switch (piece.type) {
-    case 'rigid':
     case 'accordion': return [
+      choiceRow('Head', HEAD_DIRS, piece.dir, dir => change({ dir, side: foldSideFor(dir, piece.side) })),
+      choiceRow('Fold side', FOLD_SIDES[lineAxis(piece.dir)], piece.side, side => change({ side })),
+      choiceRow('Starts', [false, true], piece.folded, folded => change({ folded })),
+      remover,
+    ];
+    case 'rigid': return [
       live('Width', 1, maxSide(level, 'h'), 1, piece.w, w => resize(piece, w, piece.h)),
       live('Height', 1, maxSide(level, 'v'), 1, piece.h, h => resize(piece, piece.w, h)),
       remover,

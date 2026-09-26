@@ -1,6 +1,6 @@
 // Board: draws grid, exit, pieces, hint dots, drag ghosts and the selected piece's edge handles. Turns pointer input
 // on the board and the palette into taps, moves, slides, edge resizes, long-press rotations and palette drops.
-import { allPieces, axisOf, cellsOf, fits, moveTo, rectOf, resizedFromEdge, slideRange } from './rules.js';
+import { accordionCells, accordionTail, allPieces, axisOf, cellsOf, fits, moveTo, rectOf, resizedFromEdge, slideRange } from './rules.js';
 import { createPiece, getPiece } from './model.js';
 
 const TAP_SLOP = 8; // px a pointer may travel and still count as a tap
@@ -55,9 +55,11 @@ function draw() {
   exit.className = 'exit';
   exit.textContent = 'EXIT';
   exit.style.left = `${level.kid.col * cell}px`;
+  // Accordions have a fixed size, so no edge handles.
   const selected = view.mode === 'edit' && view.selectedId !== 'kid' && getPiece(level, view.selectedId);
+  const handles = selected && selected.type !== 'accordion' ? handlesOf(selected) : [];
   const dots = view.dots ? view.dots.spots.map(([row, col]) => dotEl(view.dots.type, row, col)) : [];
-  boardEl.replaceChildren(exit, twinLinks(level), ...allPieces(level).map(pieceEl), ...dots, ...(selected ? handlesOf(selected) : []));
+  boardEl.replaceChildren(exit, twinLinks(level), ...allPieces(level).map(pieceEl), ...dots, ...handles);
   if (view.ghost) showGhost(view.ghost, false);
 }
 
@@ -67,6 +69,7 @@ function pieceEl(piece) {
   el.className = `piece ${piece.type}`;
   el.classList.toggle('selected', piece.id === view.selectedId);
   el.classList.toggle('pending', piece.id === view.pendingId);
+  el.classList.toggle('folded', Boolean(piece.folded));
   el.dataset.id = piece.id;
   Object.assign(el.style, {
     left: `${col * cell + INSET}px`,
@@ -74,6 +77,7 @@ function pieceEl(piece) {
     width: `${w * cell - 2 * INSET}px`,
     height: `${h * cell - 2 * INSET}px`,
   });
+  if (piece.type === 'accordion') el.append(...accordionMarks(piece));
   if (piece.type === 'turner') {
     const pivot = document.createElement('i');
     pivot.className = 'pivot';
@@ -84,6 +88,31 @@ function pieceEl(piece) {
     el.append(pivot);
   }
   return el;
+}
+
+// An accordion's face on its head cell and, exposed, a bar along the fold-side edge of the half that flips over.
+function accordionMarks(piece) {
+  const cells = accordionCells(accordionTail(piece), piece.dir, piece.side, piece.folded);
+  const offset = ([r, c]) => [(c - piece.col) * cell - INSET, (r - piece.row) * cell - INSET]; // cell corner in the piece
+  const mark = (className, left, top, width, height) => {
+    const node = document.createElement('i');
+    node.className = className;
+    Object.assign(node.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+    return node;
+  };
+  const [headLeft, headTop] = offset(cells[3]);
+  const face = mark('face', headLeft, headTop, cell, cell);
+  if (piece.folded) return [face];
+  const [bLeft, bTop] = offset(cells[2]);
+  const [left, top] = [Math.min(bLeft, headLeft), Math.min(bTop, headTop)];
+  const [span, thick] = [2 * cell - 16, 4];
+  const bar = {
+    up: [left + 8, top + 2, span, thick],
+    down: [left + 8, top + cell - 2 - thick, span, thick],
+    left: [left + 2, top + 8, thick, span],
+    right: [left + cell - 2 - thick, top + 8, thick, span],
+  }[piece.side];
+  return [face, mark('fold-mark', ...bar)];
 }
 
 // A small tappable mark in the piece's colour, centred on a top-left cell the piece could take.
@@ -163,7 +192,8 @@ function onBoardDown(event) {
   const [row, col] = cellAt(event);
   // A dot can sit on the selected piece in Play: tapping it is a dot tap, dragging it still drags the piece.
   const id = edge ? view.selectedId : isDot ? pieceAt(row, col) : event.target.closest('.piece')?.dataset.id ?? null;
-  const canRotate = view.mode === 'edit' && !edge && !isDot && id && id !== 'kid' && id !== view.pendingId;
+  const isAccordion = getPiece(view.level, id)?.type === 'accordion';
+  const canRotate = view.mode === 'edit' && !edge && !isDot && id && id !== 'kid' && id !== view.pendingId && !isAccordion;
   drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, time: event.timeStamp, id, edge, isDot, canRotate, row, col, isMoving: false, to: null };
   if (edge) {
     drag.original = getPiece(view.level, id);

@@ -145,6 +145,22 @@ button:disabled { opacity: 0.4; cursor: default; }
   background-size: var(--cell) var(--cell);
   background-position: -5px -5px;
 }
+/* Folded: the bellows squashed, ribs twice as dense */
+.piece.accordion.folded { background-size: calc(var(--cell) / 2) calc(var(--cell) / 2); }
+/* Accordion head: two dot eyes; the fold-side bar marks where the head half flips to */
+.face { position: absolute; pointer-events: none; }
+.face::before, .face::after {
+  content: "";
+  position: absolute;
+  top: 42%;
+  width: max(4px, calc(var(--cell) * 0.1));
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.face::before { left: 34%; }
+.face::after { right: 34%; }
+.fold-mark { position: absolute; pointer-events: none; border-radius: 2px; background: color-mix(in srgb, var(--c), #000 45%); }
 .piece.kid::before {
   content: "";
   position: absolute;
@@ -260,6 +276,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 .control { display: grid; grid-template-columns: 56px 1fr 40px; align-items: center; gap: 8px; font-size: 13px; }
 .control input { width: 100%; height: 32px; margin: 0; accent-color: var(--ink); }
 .control output { text-align: right; font-variant-numeric: tabular-nums; }
+/* Segmented choices (accordion head, fold side, state) */
+.control.choice { grid-template-columns: 56px 1fr; }
+.segments { display: flex; gap: 4px; }
+.segments button { flex: 1; min-height: 36px; padding: 0 4px; }
+.segments button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
 .popup-actions { display: flex; gap: 8px; }
 .popup-actions button { flex: 1; }
 .stepper { display: grid; grid-template-columns: 1fr 40px 28px 40px; align-items: center; gap: 6px; font-size: 13px; }

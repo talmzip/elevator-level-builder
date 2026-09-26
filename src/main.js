@@ -114,6 +114,7 @@ function renderHint() {
   ui.hint.textContent = state.play ? 'Drag along lanes. Tap a creature to use its ability.'
     : state.pendingTwin ? 'Tap a dot for the partner twin.'
     : state.armed ? 'Tap a dot to place.'
+    : state.selectedId && getPiece(level(), state.selectedId)?.type === 'accordion' ? 'Turn its head, pick its fold side or fold it.'
     : state.selectedId && state.selectedId !== 'kid' ? 'Drag an edge to resize. Long-press to rotate.'
     : 'Drag a creature onto the board, or tap it then a cell.';
 }
@@ -255,7 +256,8 @@ function deleteSelected() {
 // A valid file switches the list to placing its levels; they go in, in file order, after the tapped level.
 async function importLevels(file) {
   try {
-    setList({ mode: 'place', importing: store.parseImport(await file.text()) });
+    const { levels, note } = store.parseImport(await file.text());
+    setList({ mode: 'place', importing: levels, message: note });
   } catch {
     setList({ message: 'Not a valid level file.' });
   }
@@ -582,3 +584,4 @@ document.addEventListener('touchend', event => {
 
 window.addEventListener('resize', render);
 render();
+if (store.loadNote) setTimeout(() => alert(store.loadNote)); // stored levels lost something in a format upgrade

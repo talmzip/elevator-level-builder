@@ -14,10 +14,50 @@ export const isSolved = level => level.kid.row < 0;
 // The exit (and so the kid) always sits in the centre column, right of centre on an even width.
 export const exitCol = cols => Math.floor(cols / 2);
 
+// Accordion (Game-Design § 2 → Grid rules): always 4 cells, a head direction (tail → head), a fold side and a state.
+// Exposed: tail, a, b, head in a line. Folded: hinged between a and b, the head half flips over the top onto the fold
+// side, so b lies beside a and the head beside the tail — a 2×2 at the tail end. The tail never moves.
+const STEPS = { left: [0, -1], right: [0, 1], up: [-1, 0], down: [1, 0] };
+export const HEAD_DIRS = ['left', 'right', 'up', 'down'];
+export const lineAxis = dir => (dir === 'left' || dir === 'right' ? 'h' : 'v');
+export const FOLD_SIDES = { h: ['up', 'down'], v: ['left', 'right'] }; // sides of a line on each axis
+const ACCORDION_LENGTH = 4;
+
+// The fold side kept when the head turns within its axis, otherwise the new axis's default (down / right).
+export const foldSideFor = (dir, side) => (FOLD_SIDES[lineAxis(dir)].includes(side) ? side : FOLD_SIDES[lineAxis(dir)][1]);
+
+// Tail, a, b, head cells from the tail cell.
+export function accordionCells(tail, dir, side, folded) {
+  const [r, c] = tail;
+  const [dr, dc] = STEPS[dir];
+  const [sr, sc] = STEPS[side];
+  if (!folded) return [0, 1, 2, 3].map(k => [r + dr * k, c + dc * k]);
+  return [[r, c], [r + dr, c + dc], [r + dr + sr, c + dc + sc], [r + sr, c + sc]];
+}
+
+// The tail is the footprint's corner away from the head and, folded, away from the fold side.
+export function accordionTail(piece) {
+  const { row, col, w, h } = rectOf(piece);
+  const [dr, dc] = STEPS[piece.dir];
+  const [sr, sc] = STEPS[piece.side];
+  return [dr > 0 || (dr === 0 && sr > 0) ? row : row + h - 1, dc > 0 || (dc === 0 && sc > 0) ? col : col + w - 1];
+}
+
+// The accordion with its head direction, fold side or state changed and its tail kept.
+export function accordionWith(piece, changes) {
+  const next = { ...piece, ...changes };
+  const cells = accordionCells(accordionTail(piece), next.dir, next.side, next.folded);
+  return { ...next, row: Math.min(...cells.map(([r]) => r)), col: Math.min(...cells.map(([, c]) => c)) };
+}
+
 // Footprint rectangle; a piece's position is its top-left cell.
 export function rectOf(piece) {
   const { row, col } = piece;
   if (piece.type === 'kid') return { row, col, w: 1, h: 1 };
+  if (piece.type === 'accordion') {
+    if (piece.folded) return { row, col, w: 2, h: 2 };
+    return lineAxis(piece.dir) === 'h' ? { row, col, w: ACCORDION_LENGTH, h: 1 } : { row, col, w: 1, h: ACCORDION_LENGTH };
+  }
   if (isLine(piece)) {
     return piece.orientation === 'h' ? { row, col, w: piece.length, h: 1 } : { row, col, w: 1, h: piece.length };
   }
@@ -33,6 +73,7 @@ export function cellsOf(piece) {
 
 export function axisOf(piece) {
   if (piece.type === 'kid') return 'v';
+  if (piece.type === 'accordion') return lineAxis(piece.dir);
   return isLine(piece) ? piece.orientation : piece.axis;
 }
 
@@ -92,16 +133,6 @@ export function fitSpots(level, piece) {
 // New w×h anchored at the top-left cell. Axis = longer side; a square keeps its previous axis.
 export const resize = (piece, w, h) => ({ ...piece, w, h, axis: w === h ? piece.axis : w > h ? 'h' : 'v' });
 
-// Every w×h rectangle of the accordion's area that fits the grid, widest first (4 → 4×1, 2×2, 1×4).
-export function accordionStates(level, piece) {
-  const area = piece.w * piece.h;
-  const states = [];
-  for (let w = Math.min(area, level.cols); w >= 1; w--) {
-    if (area % w === 0 && area / w <= level.rows) states.push({ w, h: area / w });
-  }
-  return states;
-}
-
 // Sets the twin to newLength; its partner takes the rest. Both change at their tail ends, so heads stay put.
 // Legality (no growth into occupied cells) is `fits` on the returned pair.
 export function twinTransfer(level, twin, newLength) {
@@ -148,19 +179,13 @@ export function laneClear(level) {
   return cellsFree(level, lane, []);
 }
 
-// Play tap: the ability's next step as the changed pieces, or null when there's no room. Accordion → next state
-// that fits (wrapping), turner → turn, twin → one cell from its partner (legality of the pair is `fits`).
+// Play tap: the ability's next step as the changed pieces, or null when there's no room. Accordion → fold /
+// unfold, turner → turn, twin → one cell from its partner (legality of the pair is `fits`).
 export function abilityStep(level, piece) {
   switch (piece.type) {
     case 'accordion': {
-      const states = accordionStates(level, piece);
-      const current = states.findIndex(state => state.w === piece.w && state.h === piece.h);
-      for (let step = 1; step < states.length; step++) {
-        const { w, h } = states[(current + step) % states.length];
-        const next = resize(piece, w, h);
-        if (fits(level, next)) return [next];
-      }
-      return null;
+      const next = accordionWith(piece, { folded: !piece.folded });
+      return fits(level, next) ? [next] : null;
     }
     case 'turner': {
       const turned = turnerTurn(level, piece);
@@ -178,8 +203,12 @@ export function abilityStep(level, piece) {
 export const maxSide = (level, direction) => (direction === 'h' ? level.cols : level.rows) - 1;
 export const maxTurnerLength = (level, orientation) => Math.max(3, largestOdd(maxSide(level, orientation)));
 
-// The piece with a w×h footprint (a line takes the side along its orientation), kept within the size limits.
+// The piece with a w×h footprint (a line takes the side along its orientation), kept within the size limits. An
+// accordion keeps its 4 cells; exposed, it folds when its line no longer fits the size limit.
 function sizedTo(level, piece, w, h) {
+  if (piece.type === 'accordion') {
+    return !piece.folded && maxSide(level, axisOf(piece)) < ACCORDION_LENGTH ? accordionWith(piece, { folded: true }) : piece;
+  }
   const along = piece.orientation === 'h' ? w : h;
   if (piece.type === 'turner') return { ...piece, length: clamp(largestOdd(along), 3, maxTurnerLength(level, piece.orientation)) };
   if (piece.type === 'twin') return { ...piece, length: clamp(along, 1, maxSide(level, piece.orientation)) };
@@ -222,14 +251,15 @@ export function rotated(piece) {
 }
 
 // The spot nearest the piece's position (fewest cells away) where it fits, or null.
-function nearestFit(level, piece) {
+export function nearestFit(level, piece) {
   const distance = ([row, col]) => Math.abs(row - piece.row) + Math.abs(col - piece.col);
   const [spot] = fitSpots(level, piece).sort((a, b) => distance(a) - distance(b));
   return spot ? moveTo(piece, ...spot) : null;
 }
 
-// One size step smaller (a block loses from its longer side), or null at the minimum.
+// One size step smaller (a block loses from its longer side, an exposed accordion folds), or null at the minimum.
 function shrunk(piece) {
+  if (piece.type === 'accordion') return piece.folded ? null : accordionWith(piece, { folded: true });
   if (piece.type === 'twin') return piece.length > 1 ? { ...piece, length: piece.length - 1 } : null;
   if (piece.type === 'turner') return piece.length > 3 ? { ...piece, length: piece.length - 2 } : null;
   if (piece.w > 1 && piece.w >= piece.h) return resize(piece, piece.w - 1, piece.h);

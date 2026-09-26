@@ -1,8 +1,21 @@
 // All levels in localStorage under one key, in the export shape plus the open level: { version, levels, current }.
-import { isValidLevel, newId, newLevel, withKidCentred } from './model.js';
+import { isValidLevel, newId, newLevel, upgradeLevel, withKidCentred } from './model.js';
 
 const KEY = 'elevator-level-builder';
-const VERSION = 1;
+const VERSION = 2; // 2: accordions with head, fold side and state (version 1 files are upgraded on load and import)
+
+// A file's levels in the current shape, and a note naming the levels that lost an accordion in the upgrade.
+function upgraded(data) {
+  if (data?.version !== 1 && data?.version !== VERSION) return null;
+  if (!Array.isArray(data.levels)) return null;
+  if (data.version === VERSION) return { levels: data.levels, note: '' };
+  const results = data.levels.map(level => (level && Array.isArray(level.pieces) ? upgradeLevel(level) : { level, lost: 0 }));
+  const hit = results.flatMap(({ lost }, index) => (lost ? [index + 1] : []));
+  const note = hit.length ? `Accordions now fold. No room to convert one in level${hit.length === 1 ? '' : 's'} ${hit.join(', ')}; it was removed.` : '';
+  return { levels: results.map(({ level }) => level), note };
+}
+
+export let loadNote = ''; // set when loading upgraded stored levels and had to remove something
 
 export let current = 0; // index of the level on screen; stored so a reload reopens it
 export const levels = load();
@@ -10,7 +23,9 @@ export const levels = load();
 function load() {
   try {
     const data = JSON.parse(localStorage.getItem(KEY));
-    const stored = data?.version === VERSION && Array.isArray(data.levels) ? data.levels.filter(isValidLevel).map(withKidCentred) : [];
+    const file = upgraded(data);
+    loadNote = file?.note ?? '';
+    const stored = file ? file.levels.filter(isValidLevel).map(withKidCentred) : [];
     if (stored.length) {
       current = Number.isInteger(data.current) && stored[data.current] ? data.current : 0;
       return stored;
@@ -80,12 +95,10 @@ export function insertAllAfter(index, newLevels) {
   return index + 1;
 }
 
-// An import file's levels in file order, ready to insert (fresh ids, so re-importing an export never collides).
-// Throws on an invalid file.
+// An import file's levels in file order, ready to insert (fresh ids, so re-importing an export never collides), and
+// the upgrade note. Throws on an invalid file.
 export function parseImport(text) {
-  const data = JSON.parse(text);
-  if (data?.version !== VERSION || !Array.isArray(data.levels) || !data.levels.length || !data.levels.every(isValidLevel)) {
-    throw new Error('invalid level file');
-  }
-  return data.levels.map(level => ({ ...withKidCentred(level), id: newId() }));
+  const file = upgraded(JSON.parse(text));
+  if (!file || !file.levels.length || !file.levels.every(isValidLevel)) throw new Error('invalid level file');
+  return { levels: file.levels.map(level => ({ ...withKidCentred(level), id: newId() })), note: file.note };
 }
