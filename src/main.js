@@ -11,6 +11,7 @@ import { checkRequest } from './generator.js';
 const EXIT_DEPTH = 0.6; // exit strip above the board, in cells (matches .stage padding in style.css)
 const FLASH_MS = 1800;
 const POOL_SIZE = 5; // generated levels kept ready
+const DOUBLE_TAP_MS = 350; // taps closer than this count as a double tap
 const SEARCH_WORKERS = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
 
 const $ = id => document.getElementById(id);
@@ -570,6 +571,14 @@ document.addEventListener('gesturechange', noZoom);
 document.addEventListener('touchmove', event => event.touches.length > 1 && event.preventDefault(), { passive: false });
 document.addEventListener('wheel', event => event.ctrlKey && event.preventDefault(), { passive: false });
 document.addEventListener('contextmenu', event => event.target !== ui.name && event.preventDefault());
+// Double-tap zoom where touch-action isn't honoured: a second tap within DOUBLE_TAP_MS outside the controls is
+// cancelled. Buttons, the name field, the board and the palette keep every tap (they opt out of zoom in CSS).
+let lastTapEnd = 0;
+document.addEventListener('touchend', event => {
+  const isControl = event.target.closest('button, input, #board, #palette, .grip');
+  if (!isControl && event.timeStamp - lastTapEnd < DOUBLE_TAP_MS) event.preventDefault();
+  lastTapEnd = event.timeStamp;
+}, { passive: false });
 
 window.addEventListener('resize', render);
 render();

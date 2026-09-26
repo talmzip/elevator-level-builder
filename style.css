@@ -19,6 +19,9 @@
 
 /* An app, not a page: no pinch or double-tap zoom, no text selection or long-press callout (the name field excepted) */
 html { touch-action: pan-x pan-y; }
+/* iOS applies touch-action per touched element, so every element opts out of double-tap zoom */
+*, *::before, *::after { touch-action: manipulation; }
+.board *, .palette * { touch-action: none; }
 body { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 #name { user-select: text; -webkit-user-select: text; }
 
